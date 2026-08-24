@@ -1123,6 +1123,28 @@ def model_id_key(provider: str, model_id: str) -> str:
     return f"{provider}|{model_id.split('/')[-1].lower()}"
 
 
+# Routes that a provider still advertises in its catalog but that cannot
+# actually be used for free. Without this denylist every sync would
+# re-propose them, because catalog discovery only sees the listing, not the
+# call result. Each entry names the live evidence and the date it was taken.
+DEAD_ROUTES: dict[str, str] = {
+    # HTTP 403: "only available on agentic harnesses" -- an OpenAI-compatible
+    # proxy is not an eligible client (2026-08-24).
+    "openrouter|inkling:free": "harness-gated (HTTP 403)",
+    "openrouter|inkling-small:free": "harness-gated (HTTP 403)",
+    # Listed by NVIDIA but not callable: HTTP 404/401 on
+    # integrate.api.nvidia.com; the predecessor kimi-k2-instruct is
+    # end-of-life (HTTP 410) (2026-08-24).
+    "nvidia|kimi-k2.6": "listed but not callable (HTTP 404)",
+}
+
+
+def is_dead_route(provider: str, model_id: str) -> bool:
+    """True if (provider, model_id) is a catalog entry that live tests
+    proved unusable on the free tier -- see DEAD_ROUTES."""
+    return model_id_key(provider, model_id) in DEAD_ROUTES
+
+
 def generate_apply_plan(
     groups: dict[str, dict[str, list[str]]],
     zen_groups: dict[str, dict[str, list[str]]],
@@ -1180,6 +1202,9 @@ def generate_apply_plan(
         for provider, originals in providers.items():
             for orig in sorted(set(originals)):
                 key = model_id_key(provider, orig)
+                if key in DEAD_ROUTES:
+                    # Advertised but unusable -- never propose it again.
+                    continue
                 if key in existing_keys or key in global_keys:
                     plan.append({
                         "model_name": model_name,
@@ -1631,6 +1656,13 @@ def _native_model_id(model_id: str) -> str:
     return model_id.split("/", 1)[1]
 
 
+# Providers whose model IDs are case-sensitive. HuggingFace serves repo
+# IDs verbatim and answers HTTP 400 ("does not exist") for a miscased one,
+# so a case-only drift there is a dead deployment. Other catalogs (e.g.
+# Cerebras' "GPT-OSS-120B") vary the spelling without breaking the call.
+CASE_SENSITIVE_CATALOGS = {"huggingface"}
+
+
 def find_stale_deployments(
     template_path: Path,
     raw: dict[str, list[str]],
@@ -1651,7 +1683,7 @@ def find_stale_deployments(
     _, _, blocks = rc.parse_blocks(lines)
 
     catalogs = {
-        p: {m.lower() for m in models}
+        p: {m.lower(): m for m in models}
         for p, models in raw.items()
         if models and p not in partial
     }
@@ -1669,11 +1701,24 @@ def find_stale_deployments(
         if b["model_name"] in STALE_CHECK_EXEMPT:
             continue
         native = _native_model_id(b["model_id"])
-        if native.lower() not in catalogs[provider]:
+        catalog_id = catalogs[provider].get(native.lower())
+        if catalog_id is None:
             stale.append({
                 "model_name": b["model_name"],
                 "provider": provider,
                 "native_id": native,
+                "kind": "missing",
+                "catalog_id": None,
+            })
+        elif catalog_id != native and provider in CASE_SENSITIVE_CATALOGS:
+            # Same model, different spelling -- a dead deployment that the
+            # case-insensitive comparison above would never surface.
+            stale.append({
+                "model_name": b["model_name"],
+                "provider": provider,
+                "native_id": native,
+                "kind": "case",
+                "catalog_id": catalog_id,
             })
     return stale
 
@@ -1791,7 +1836,12 @@ def write_report(
         lines.append("  (none — every template deployment is present in the catalogs)")
     else:
         for s in sorted(stale, key=lambda x: (x["provider"], x["model_name"])):
-            lines.append(f"  [!] {s['provider']:14s} {s['model_name']:26s} -> {s['native_id']}")
+            if s.get("kind") == "case":
+                lines.append(f"  [~] {s['provider']:14s} {s['model_name']:26s} "
+                             f"-> {s['native_id']} (catalog spells it "
+                             f"{s['catalog_id']} -- case mismatch)")
+            else:
+                lines.append(f"  [!] {s['provider']:14s} {s['model_name']:26s} -> {s['native_id']}")
     lines.append("")
 
     # ------------------------------------------------------------------
@@ -2207,8 +2257,15 @@ def main() -> int:
     if args.template.exists() and raw:
         stale = find_stale_deployments(args.template, raw)
         if stale:
-            print(f"\n[WARN] {len(stale)} template deployment(s) no longer found "
-                  f"in the provider catalog — see the report (section "
+            miscased = sum(1 for s in stale if s.get("kind") == "case")
+            missing = len(stale) - miscased
+            detail = []
+            if missing:
+                detail.append(f"{missing} no longer in the provider catalog")
+            if miscased:
+                detail.append(f"{miscased} spelled with the wrong case")
+            print(f"\n[WARN] {len(stale)} template deployment(s): "
+                  f"{', '.join(detail)} — see the report (section "
                   f"'Stale template deployments') for details.")
 
     write_report(args.output, raw, errors, groups, zen_groups, pricing,

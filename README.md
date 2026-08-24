@@ -124,7 +124,7 @@ Response: JSON object with `choices[0].message.content` (OpenAI-compatible forma
                   ┌─────────────────────────────────────────┐
                   │       LiteLLM Proxy (:4000 internal)    │
                   │     Routing: usage-based-routing-v2     │
-   Client ──────► │     73 model_names, 149 deployments      │
+   Client ──────► │     74 model_names, 143 deployments      │
    (Port 4444)   │     Cooldown 60s, Retries 1             │
                   └────────────┬────────────────────────────┘
                                │
@@ -144,7 +144,7 @@ In the [`multi-instance/`](multi-instance/README.md) directory an additional mas
 ```
                   ┌──────────────────────────────────┐
                   │   MASTER (:4000, own keys)       │
-   Client ──────► │  149 direct + 146 slave backends │
+   Client ──────► │  143 direct + 148 slave backends │
                   └──────────────┬───────────────────┘
                                  │
                 ┌────────────────┼────────────────┐
@@ -168,9 +168,9 @@ Effectively **3× rate limit per provider** (master + 2 slaves with different ac
 | 1  | OpenRouter              | API Key       | 1               | `OPENROUTER_API_KEY`                            | Catch-all plus free chat and NVIDIA text/VL embeddings |
 | 2  | Cerebras                | API Key       | 30              | `CEREBRAS_API_KEY`                              | `llama3.1-8b` deprecated (2026-05-27) |
 | 3  | Groq                    | API Key       | 2-30            | `GROQ_API_KEY`                                  | Model-dependent |
-| 4  | Cloudflare Workers AI   | API Token     | 10              | `CLOUDFLARE_API_KEY` + `CLOUDFLARE_API_BASE`    | Suffix `-fp8-fast` |
+| 4  | Cloudflare Workers AI   | API Token     | 10              | `CLOUDFLARE_API_KEY` + `CLOUDFLARE_API_BASE`    | Suffix `-fp8-fast` / `-fp8` |
 | 5  | Google AI Studio        | API Key       | 2               | `GEMINI_API_KEY`                                | Currently no active deployment (gemma-3 series retired); key kept for future syncs |
-| 6  | NVIDIA NIM              | API Key       | 40              | `NVIDIA_API_KEY`                                | OpenAI-compatible, Kimi = `moonshotai/kimi-k2-instruct` |
+| 6  | NVIDIA NIM              | API Key       | 40              | `NVIDIA_API_KEY`                                | OpenAI-compatible, Kimi = `moonshotai/kimi-k3` |
 | 7  | Mistral La Plateforme   | API Key       | 2               | `MISTRAL_API_KEY`                               | Phone verification required |
 | 8  | Cohere                  | API Key       | 20              | `COHERE_API_KEY`                                | Trial key, 1000 calls/month |
 | 9  | Poolside                | API Key       | 10*             | `POOLSIDE_API_KEY`                              | Laguna S 2.1; limited-time free preview, unpublished limits |
@@ -178,8 +178,30 @@ Effectively **3× rate limit per provider** (master + 2 slaves with different ac
 | 11 | ElevenLabs              | API Key       | 2*              | `ELEVENLABS_API_KEY`                            | Free Scribe v2 STT; noncommercial free-plan output |
 | 12 | OpenCode Zen            | API Key       | 10              | `OPENCODE_ZEN_API_KEY`                          | Free models: `deepseek-v4-flash-free`, `big-pickle`, `laguna-s-2.1-free` |
 | 13 | LLM7.io                 | API Key       | 10 / 40        | `LLM7IO_API_KEY`                                | `unused` = anonymous; free dashboard token = 40 RPM |
-| 14 | HuggingFace Inference   | API Token     | 30              | `HF_TOKEN`                                      | 150K+ models via `huggingface/<org>/<model>` |
+| 14 | HuggingFace Inference   | API Token     | 30              | `HF_TOKEN`                                      | Monthly credit budget, not just a rate limit — see below |
 | 15 | OVHcloud AI Endpoints   | **no key**    | 2 (anonymous)   | `OVHCLOUD_API_KEY` (optional/empty)             | Anonymous free tier, IP limit |
+
+**HuggingFace is credit-metered, not merely rate-limited.** The Inference
+Providers router bills every call against a small monthly included credit
+budget (free accounts currently get roughly $0.10). Once it is used up, *all*
+HF routes answer `HTTP 402 "You have depleted your monthly included credits"`
+until the budget resets at the start of the next billing period — the 30 RPM
+figure only describes the per-provider rate limit on top of that. Pinning a
+cheaper backend does not help: the models in this router are served by partner
+providers (`featherless-ai`, `scaleway`, `deepinfra`, …) that all draw from the
+same budget, and `:hf-inference` does not serve them. Check the account and its
+reset date with:
+
+```bash
+curl -s -H "Authorization: Bearer $HF_TOKEN" https://huggingface.co/api/whoami-v2 | jq '{name, isPro, periodEnd}'
+```
+
+While the budget is exhausted, the fallback chains carry chat traffic to other
+providers; the HF-only aliases (`deepseek-r1-0528`, `deepseek-v3`,
+`qwen3-235b`, `qwen3-next-80b-a3b`, `mimo-v2.5`, `inkling-small`) fall through
+to the catch-all chain instead. Note also that HF repo IDs are **case-sensitive**
+(`google/gemma-4-31B-it`, not `…-31b-it`); a miscased ID answers HTTP 400, and
+the sync report flags that as a case mismatch.
 
 GitHub Models was removed after GitHub retired the service on 2026-07-30;
 live catalog and inference checks now return HTTP 404/410. Existing
@@ -196,22 +218,22 @@ the displayed values are conservative local routing budgets, not provider claims
 ## 🤖 Models
 
 <!-- BEGIN GENERATED MODEL MATRIX (python3 find-shared-models.py --write-docs) -->
-Snapshot (generated from `config.template.yaml`): **73 model_names, 149 base deployments**. `render-config.py` removes deployments from providers without an API key in `.env` — the effective count can therefore be lower.
+Snapshot (generated from `config.template.yaml`): **74 model_names, 143 base deployments**. `render-config.py` removes deployments from providers without an API key in `.env` — the effective count can therefore be lower.
 
 | model_name | Deployments | Provider |
 |---|---|---|
-| `gpt-oss-20b` | 7 | OpenRouter, Groq, Cloudflare, NVIDIA, OVHcloud, HuggingFace, LLM7.io |
 | `gpt-oss-120b` | 6 | Cerebras, Groq, Cloudflare, NVIDIA, OVHcloud, HuggingFace |
 | `gemma-4-31b-it` | 5 | OpenRouter, NVIDIA, HuggingFace, Cerebras, Google AI Studio |
-| `kimi-k2.6` | 5 | Cloudflare, NVIDIA, OpenCode Zen, HuggingFace |
-| `deepseek-v4-flash` | 4 | NVIDIA, OpenCode Zen, HuggingFace |
+| `gpt-oss-20b` | 5 | Groq, Cloudflare, NVIDIA, OVHcloud, HuggingFace |
 | `gemma-4-26b-a4b-it` | 4 | OpenRouter, Cloudflare, HuggingFace, Google AI Studio |
 | `llama-3.3-70b-instruct` | 4 | Cloudflare, OVHcloud, HuggingFace, NVIDIA |
+| `deepseek-v4-flash` | 3 | OpenCode Zen, HuggingFace |
 | `deepseek-v4-flash-0731` | 3 | LLM7.io, HuggingFace, NVIDIA |
+| `kimi-k3` | 3 | OpenCode Zen, HuggingFace, NVIDIA |
 | `laguna-s-2.1` | 3 | OpenRouter, OpenCode Zen, Poolside |
+| `laguna-xs-2.1` | 3 | OpenRouter, NVIDIA, Poolside |
 | `llama-3.1-8b` | 3 | Cloudflare, NVIDIA, HuggingFace |
 | `nemotron-3-120b` | 3 | OpenRouter, Cloudflare, NVIDIA |
-| `nemotron-3-nano-30b` | 3 | OpenRouter, NVIDIA, HuggingFace |
 | `nemotron-3-ultra` | 3 | OpenRouter, OpenCode Zen, NVIDIA |
 | `qwen3.6-27b` | 3 | Groq, HuggingFace, OVHcloud |
 | `audio-transcription` | 2 | Groq, ElevenLabs |
@@ -219,14 +241,11 @@ Snapshot (generated from `config.template.yaml`): **73 model_names, 149 base dep
 | `deepseek-v4-pro` | 2 | OpenCode Zen, HuggingFace |
 | `gemma-3-12b-it` | 2 | NVIDIA, HuggingFace |
 | `gemma-3-4b-it` | 2 | NVIDIA, HuggingFace |
-| `glm-5.2` | 2 | OpenRouter, NVIDIA |
 | `gpt-oss-safeguard-20b` | 2 | Groq, HuggingFace |
 | `inkling` | 2 | NVIDIA, HuggingFace |
 | `kimi-k2.5` | 2 | OpenCode Zen, HuggingFace |
+| `kimi-k2.6` | 2 | OpenCode Zen, HuggingFace |
 | `kimi-k2.7-code` | 2 | OpenCode Zen, HuggingFace |
-| `kimi-k3` | 2 | OpenCode Zen, HuggingFace |
-| `laguna-xs-2.1` | 2 | OpenRouter, NVIDIA |
-| `llama-4-maverick` | 2 | NVIDIA, HuggingFace |
 | `llama-4-scout` | 2 | Cloudflare, HuggingFace |
 | `llama-guard-4-12b` | 2 | NVIDIA, HuggingFace |
 | `lyria-3-clip` | 2 | OpenRouter, Google AI Studio |
@@ -234,17 +253,18 @@ Snapshot (generated from `config.template.yaml`): **73 model_names, 149 base dep
 | `mimo-v2.5` | 2 | HuggingFace |
 | `minimax-m3` | 2 | NVIDIA, HuggingFace |
 | `mistral-nemo-instruct-2407` | 2 | LLM7.io, OVHcloud |
+| `nemotron-3-nano-30b` | 2 | OpenRouter, NVIDIA |
 | `nemotron-3-nano-omni-30b-a3b-reasoning` | 2 | OpenRouter, NVIDIA |
 | `nemotron-3.5-content-safety` | 2 | OpenRouter, NVIDIA |
 | `nemotron-3.5-lightning-free` | 2 | OpenRouter, OpenCode Zen |
 | `nemotron-nano-12b-v2-vl` | 2 | OpenRouter, NVIDIA |
 | `nemotron-nano-9b-v2` | 2 | OpenRouter, NVIDIA |
-| `north-mini-code` | 2 | OpenCode Zen, OpenRouter |
 | `qwen2.5-vl-72b-instruct` | 2 | HuggingFace, OVHcloud |
 | `qwen3-32b` | 2 | HuggingFace, OVHcloud |
 | `qwen3-coder-30b-a3b` | 2 | HuggingFace, OVHcloud |
 | `qwen3.5-397b-a17b` | 2 | HuggingFace, OVHcloud |
 | `qwen3.5-9b` | 2 | HuggingFace, OVHcloud |
+| `qwen3.6-35b-a3b` | 2 | Hetzner, HuggingFace |
 | `step-3.7-flash` | 2 | NVIDIA, HuggingFace |
 | `whisper-large-v3` | 2 | Groq, OVHcloud |
 | `whisper-large-v3-turbo` | 2 | Groq, OVHcloud |
@@ -265,13 +285,16 @@ Snapshot (generated from `config.template.yaml`): **73 model_names, 149 base dep
 | `glm-4.5-flash` | 1 | Z.AI |
 | `glm-4.6v-flash` | 1 | Z.AI |
 | `glm-4.7-flash` | 1 | Z.AI |
+| `glm-5.2` | 1 | OpenRouter |
+| `inkling-small` | 1 | HuggingFace |
 | `lfm-2.5-2.6b` | 1 | OpenRouter |
+| `llama-4-maverick` | 1 | HuggingFace |
 | `minimax-m2.7` | 1 | LLM7.io |
 | `mistral-large` | 1 | Mistral |
+| `north-mini-code` | 1 | OpenRouter |
 | `openrouter-free` | 1 | OpenRouter |
 | `qwen3-235b` | 1 | HuggingFace |
 | `qwen3-next-80b-a3b` | 1 | HuggingFace |
-| `qwen3.6-35b-a3b` | 1 | Hetzner |
 | `qwen3.8-27b` | 1 | Hetzner |
 <!-- END GENERATED MODEL MATRIX -->
 
@@ -569,7 +592,7 @@ More detailed docs on `find-shared-models.py` and output formats: [`AGENTS.md`](
 
 The [`multi-instance/`](multi-instance/README.md) directory contains a complete master/slave setup:
 
-- **Master** with up to 295 deployments (149 direct + 146 slave backends when all provider keys are configured)
+- **Master** with up to 291 deployments (143 direct + 148 slave backends when all provider keys are configured)
 - **2 Slaves** with 99 deployments each under different API keys
 - Provider API keys per instance (`master/.env`, `slave1/.env`, `slave2/.env`); shared Redis/Postgres passwords in the project-level `multi-instance/.env`
 - Dedicated docker-compose and Kubernetes manifests (`multi-instance/k8s/`)

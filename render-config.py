@@ -12,6 +12,8 @@ Renders config.template.yaml into config.yaml.
      fallback chain and to the catch-all `*`.
   5. Removes fallback entries AND chain targets that point to model_names
      that no longer exist.
+  5b. Generates `model_group_retry_policy` for every model_name left with a
+     single deployment, so a Retry-After never stalls the fallback chain.
   6. Writes config.yaml atomically with a .bak.<timestamp> backup of the
      previous version (at most BACKUP_KEEP backups are kept).
 
@@ -59,10 +61,15 @@ SINGLE_PROVIDER_ALLOWED = {
     "glm-4.5-flash", "glm-4.7-flash", "glm-4.6v-flash",
     # Current OpenRouter-only free models (live-tested 2026-08-19).
     "dots-3-note-preview", "lfm-2.5-2.6b",
-    # Hetzner Experiments currently provides these exact IDs exclusively.
-    "qwen3.6-35b-a3b", "qwen3.8-27b",
+    # Hetzner Experiments currently provides this exact ID exclusively.
+    "qwen3.8-27b",
     # Current LLM7 free-token catalog exclusives.
     "gemini-3.1-flash-lite", "minimax-m2.7",
+    # Lost their second free host in the 2026-08-24 sync (live-tested):
+    # NVIDIA retired glm-5.2 and llama-4-maverick (HTTP 410), and the
+    # OpenRouter inkling-small:free route is gated to agentic harnesses
+    # (HTTP 403), leaving HuggingFace as the only usable host.
+    "glm-5.2", "llama-4-maverick", "inkling-small",
 }
 
 
@@ -277,6 +284,54 @@ def single_deployment_warnings(kept_blocks: list[dict]) -> list[str]:
         and mn not in SINGLE_PROVIDER_ALLOWED
         and mn not in non_chat_names
     )
+
+
+def single_deployment_model_names(kept_blocks: list[dict]) -> list[str]:
+    """
+    Every model_name that is left with exactly ONE deployment after the
+    provider filter -- including the documented SINGLE_PROVIDER_ALLOWED
+    exceptions and the non-chat aliases, because the stall this feeds
+    (see build_retry_policy_lines) hits them just the same.
+    """
+    counts: dict[str, int] = {}
+    for b in kept_blocks:
+        counts[b["model_name"]] = counts.get(b["model_name"], 0) + 1
+    return sorted(mn for mn, c in counts.items() if c == 1)
+
+
+def build_retry_policy_lines(model_names: list[str]) -> list[str]:
+    """
+    Renders the `model_group_retry_policy` block that keeps single-deployment
+    model groups from sleeping through a Retry-After (up to 60s) before the
+    fallback chain is tried. `RateLimitErrorRetries: 0` makes the router raise
+    the rate-limit error straight into the fallback layer instead.
+    """
+    if not model_names:
+        return []
+    lines = ["  model_group_retry_policy:\n"]
+    for mn in model_names:
+        lines.append(f"    {mn}:\n")
+        lines.append("      RateLimitErrorRetries: 0\n")
+    return lines
+
+
+def insert_retry_policy(lines: list[str], model_names: list[str]) -> list[str]:
+    """
+    Replaces the region between the
+    `# BEGIN/END GENERATED SINGLE-DEPLOYMENT RETRY POLICY` markers with the
+    generated policy. Templates without the markers are left untouched.
+    """
+    start = end = -1
+    for i, line in enumerate(lines):
+        s = line.strip()
+        if s.startswith("# BEGIN GENERATED SINGLE-DEPLOYMENT RETRY POLICY"):
+            start = i
+        elif s.startswith("# END GENERATED SINGLE-DEPLOYMENT RETRY POLICY"):
+            end = i
+            break
+    if start == -1 or end == -1 or end < start:
+        return lines
+    return lines[:start] + build_retry_policy_lines(model_names) + lines[end + 1:]
 
 
 def strip_redis_blocks(lines: list[str], redis_active: bool) -> list[str]:
@@ -547,6 +602,11 @@ def render(
         valid_model_names=valid_names,
         no_fallback_model_names=no_fallback_names,
     )
+
+    # 5b) Generate the single-deployment retry policy (needs the filtered
+    #     deployment list, so it runs after the block filter)
+    singles_all = single_deployment_model_names(kept)
+    new_lines = insert_retry_policy(new_lines, singles_all)
 
     # 6) Print the valid model_names list
     print(f"Kept deployments: {len(kept)}")

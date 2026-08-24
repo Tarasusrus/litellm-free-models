@@ -51,7 +51,7 @@ Client ──► MASTER (:4000, own keys + slave routing)
               └─► Slave 2 (:4002, other API keys)
 ```
 
-Master (with every provider key configured): 149 direct + 146 slave deployments = **295 deployments**. Slaves reuse the base `config.yaml` via a Docker volume mount.
+Master (with every provider key configured): 143 direct + 148 slave deployments = **291 deployments**. Slaves reuse the base `config.yaml` via a Docker volume mount.
 
 **Positioning (deliberate decision):** Multi-key deployments in ONE instance have the same 3× effect without the overhead. The master/slave setup is positioned only for **separate hosts/egress IPs** (IP-based limits like OVHcloud) — see the README section "Multi-Instance".
 
@@ -87,17 +87,17 @@ Full env-var list including `REDIS_*`/`POSTGRES_*`: see `.env.example` (that fil
   IDs participate in stale checks but are excluded from chat overlap/apply.
   Current NVIDIA aliases are `embedding-nvidia-text` and
   `embedding-nvidia-vl`, both live-tested at 2048 dimensions.
-- **NVIDIA**: deployment name = `openai/openai/<model>` → sends `openai/<model>` to NVIDIA. Kimi runs under `moonshotai/kimi-k2-instruct` (different from `kimi-k2.6` on OpenRouter/Cloudflare).
+- **NVIDIA**: deployment name = `openai/openai/<model>` → sends `openai/<model>` to NVIDIA. Kimi runs under `moonshotai/kimi-k3`; the older `kimi-k2-instruct` and `kimi-k2.6` routes were retired (HTTP 410 / 404, live-tested 2026-08-24).
 - **GitHub Models**: retired by GitHub on 2026-07-30 and removed after live tests returned HTTP 404/410. The local `GITHUB_TOKEN` is no longer consumed.
 - **Poolside**: OpenAI-compatible at `https://inference.poolside.ai/v1`; `poolside/laguna-s-2.1` is free for a limited time. Poolside does not publish preview limits, so the router uses a conservative 10 RPM / 200K TPM budget (`*`).
 - **Hetzner Experiments**: OpenAI-compatible at `https://inference.hetzner.com/api/v1`; free, best-effort, and explicitly without production SLA. Configured aliases are `qwen3.6-35b-a3b` (`Qwen/Qwen3.6-35B-A3B-FP8`) and multimodal `qwen3.8-27b` (`Qwen3.8-27B`), both with 262,144-token context advertised by Hetzner. Limits are unpublished, so routing starts at 5 RPM / 200K TPM (`*`).
 - **Z.AI**: native LiteLLM `zai/` provider; free `glm-4.5-flash`, `glm-4.7-flash`, and vision-capable `glm-4.6v-flash`. The API omits these IDs from `/models` although they are callable. Limits are unpublished, so routing starts at 1 RPM / 100K TPM (`*`).
 - **ElevenLabs**: native LiteLLM `elevenlabs/` provider; `scribe_v2` is a second deployment behind `audio-transcription`. Free-plan TTS cannot use premade/library voices and is therefore not routed. Free output is noncommercial; published output requires attribution.
-- **OpenCode Zen**: endpoint `https://opencode.ai/zen/v1`, models: `deepseek-v4-flash-free`, `nemotron-3-ultra-free`, `big-pickle`, `north-mini-code-free`.
-- **Cloudflare**: model suffix `-fp8-fast` instead of `-fp8` (verified against the API docs). `deepseek-v4-flash` doesn't exist on Cloudflare.
+- **OpenCode Zen**: endpoint `https://opencode.ai/zen/v1`, models: `deepseek-v4-flash-free`, `nemotron-3-ultra-free`, `big-pickle`. `north-mini-code-free` left the catalog on 2026-08-24; `north-mini-code` now runs on OpenRouter only.
+- **Cloudflare**: `llama-3.3-70b-instruct` uses the `-fp8-fast` suffix, `llama-3.1-8b` the plain `-fp8` ID (catalog-verified 2026-08-24; both llama-3.1-8b variants answer live). `deepseek-v4-flash` doesn't exist on Cloudflare, and `@cf/moonshotai/kimi-k2.6` is excluded from the Workers Free plan (HTTP 403).
 - **Cerebras**: `llama3.1-8b` was deprecated on 2026-05-27.
 - **LLM7.io**: OpenAI-compatible at `https://api.llm7.io/v1`. Anonymous tier: 10 RPM / 500K tokens per day; a free token from `dash.llm7.io` raises this to 40 RPM / 1M tokens per day. Only live catalog records with `tier: turbo` and `usage_based_only: false` are free; `pro` or usage-based-only routes are rejected by discovery. `api_key: "unused"` remains valid for anonymous access.
-- **HuggingFace**: uses LiteLLM's `huggingface/` prefix → routes to the HF Inference API. Rate-limited, no credit card needed.
+- **HuggingFace**: uses LiteLLM's `huggingface/` prefix → routes to the HF Inference Providers router. **Credit-metered, not just rate-limited**: every call draws from a small monthly included budget (~$0.10 on a free account); once it is gone, all 36 HF deployments answer HTTP 402 until the period resets (`periodEnd` from `https://huggingface.co/api/whoami-v2`). Pinning a backend does not help — the catalog models are served by partner providers (featherless-ai/scaleway/deepinfra) that share the budget, and `:hf-inference` does not serve them. Repo IDs are **case-sensitive** (`google/gemma-4-31B-it`); a miscased ID answers HTTP 400 and is reported by the sync as a case mismatch. Deliberate decision (2026-08-24): HF stays configured — the fallback chains absorb the 402s.
 - **OVHcloud**: OpenAI-compatible at `https://oai.endpoints.kepler.ai.cloud.ovh.net/v1`. **Anonymous free tier** without an API key (2 RPM/IP/model). `api_key: ""` in `config.yaml`.
 - **Google AI Studio**: currently **no active deployment** (Google retired the gemma-3 series, June 2026). `GEMINI_API_KEY` stays documented for future catalog syncs.
 
@@ -108,22 +108,22 @@ Full env-var list including `REDIS_*`/`POSTGRES_*`: see `.env.example` (that fil
 The matrix is **generated** (`python3 find-shared-models.py --write-docs`), not hand-maintained — CI checks for drift:
 
 <!-- BEGIN GENERATED MODEL MATRIX (python3 find-shared-models.py --write-docs) -->
-Snapshot (generated from `config.template.yaml`): **73 model_names, 149 base deployments**. `render-config.py` removes deployments from providers without an API key in `.env` — the effective count can therefore be lower.
+Snapshot (generated from `config.template.yaml`): **74 model_names, 143 base deployments**. `render-config.py` removes deployments from providers without an API key in `.env` — the effective count can therefore be lower.
 
 | model_name | Deployments | Provider |
 |---|---|---|
-| `gpt-oss-20b` | 7 | OpenRouter, Groq, Cloudflare, NVIDIA, OVHcloud, HuggingFace, LLM7.io |
 | `gpt-oss-120b` | 6 | Cerebras, Groq, Cloudflare, NVIDIA, OVHcloud, HuggingFace |
 | `gemma-4-31b-it` | 5 | OpenRouter, NVIDIA, HuggingFace, Cerebras, Google AI Studio |
-| `kimi-k2.6` | 5 | Cloudflare, NVIDIA, OpenCode Zen, HuggingFace |
-| `deepseek-v4-flash` | 4 | NVIDIA, OpenCode Zen, HuggingFace |
+| `gpt-oss-20b` | 5 | Groq, Cloudflare, NVIDIA, OVHcloud, HuggingFace |
 | `gemma-4-26b-a4b-it` | 4 | OpenRouter, Cloudflare, HuggingFace, Google AI Studio |
 | `llama-3.3-70b-instruct` | 4 | Cloudflare, OVHcloud, HuggingFace, NVIDIA |
+| `deepseek-v4-flash` | 3 | OpenCode Zen, HuggingFace |
 | `deepseek-v4-flash-0731` | 3 | LLM7.io, HuggingFace, NVIDIA |
+| `kimi-k3` | 3 | OpenCode Zen, HuggingFace, NVIDIA |
 | `laguna-s-2.1` | 3 | OpenRouter, OpenCode Zen, Poolside |
+| `laguna-xs-2.1` | 3 | OpenRouter, NVIDIA, Poolside |
 | `llama-3.1-8b` | 3 | Cloudflare, NVIDIA, HuggingFace |
 | `nemotron-3-120b` | 3 | OpenRouter, Cloudflare, NVIDIA |
-| `nemotron-3-nano-30b` | 3 | OpenRouter, NVIDIA, HuggingFace |
 | `nemotron-3-ultra` | 3 | OpenRouter, OpenCode Zen, NVIDIA |
 | `qwen3.6-27b` | 3 | Groq, HuggingFace, OVHcloud |
 | `audio-transcription` | 2 | Groq, ElevenLabs |
@@ -131,14 +131,11 @@ Snapshot (generated from `config.template.yaml`): **73 model_names, 149 base dep
 | `deepseek-v4-pro` | 2 | OpenCode Zen, HuggingFace |
 | `gemma-3-12b-it` | 2 | NVIDIA, HuggingFace |
 | `gemma-3-4b-it` | 2 | NVIDIA, HuggingFace |
-| `glm-5.2` | 2 | OpenRouter, NVIDIA |
 | `gpt-oss-safeguard-20b` | 2 | Groq, HuggingFace |
 | `inkling` | 2 | NVIDIA, HuggingFace |
 | `kimi-k2.5` | 2 | OpenCode Zen, HuggingFace |
+| `kimi-k2.6` | 2 | OpenCode Zen, HuggingFace |
 | `kimi-k2.7-code` | 2 | OpenCode Zen, HuggingFace |
-| `kimi-k3` | 2 | OpenCode Zen, HuggingFace |
-| `laguna-xs-2.1` | 2 | OpenRouter, NVIDIA |
-| `llama-4-maverick` | 2 | NVIDIA, HuggingFace |
 | `llama-4-scout` | 2 | Cloudflare, HuggingFace |
 | `llama-guard-4-12b` | 2 | NVIDIA, HuggingFace |
 | `lyria-3-clip` | 2 | OpenRouter, Google AI Studio |
@@ -146,17 +143,18 @@ Snapshot (generated from `config.template.yaml`): **73 model_names, 149 base dep
 | `mimo-v2.5` | 2 | HuggingFace |
 | `minimax-m3` | 2 | NVIDIA, HuggingFace |
 | `mistral-nemo-instruct-2407` | 2 | LLM7.io, OVHcloud |
+| `nemotron-3-nano-30b` | 2 | OpenRouter, NVIDIA |
 | `nemotron-3-nano-omni-30b-a3b-reasoning` | 2 | OpenRouter, NVIDIA |
 | `nemotron-3.5-content-safety` | 2 | OpenRouter, NVIDIA |
 | `nemotron-3.5-lightning-free` | 2 | OpenRouter, OpenCode Zen |
 | `nemotron-nano-12b-v2-vl` | 2 | OpenRouter, NVIDIA |
 | `nemotron-nano-9b-v2` | 2 | OpenRouter, NVIDIA |
-| `north-mini-code` | 2 | OpenCode Zen, OpenRouter |
 | `qwen2.5-vl-72b-instruct` | 2 | HuggingFace, OVHcloud |
 | `qwen3-32b` | 2 | HuggingFace, OVHcloud |
 | `qwen3-coder-30b-a3b` | 2 | HuggingFace, OVHcloud |
 | `qwen3.5-397b-a17b` | 2 | HuggingFace, OVHcloud |
 | `qwen3.5-9b` | 2 | HuggingFace, OVHcloud |
+| `qwen3.6-35b-a3b` | 2 | Hetzner, HuggingFace |
 | `step-3.7-flash` | 2 | NVIDIA, HuggingFace |
 | `whisper-large-v3` | 2 | Groq, OVHcloud |
 | `whisper-large-v3-turbo` | 2 | Groq, OVHcloud |
@@ -177,23 +175,26 @@ Snapshot (generated from `config.template.yaml`): **73 model_names, 149 base dep
 | `glm-4.5-flash` | 1 | Z.AI |
 | `glm-4.6v-flash` | 1 | Z.AI |
 | `glm-4.7-flash` | 1 | Z.AI |
+| `glm-5.2` | 1 | OpenRouter |
+| `inkling-small` | 1 | HuggingFace |
 | `lfm-2.5-2.6b` | 1 | OpenRouter |
+| `llama-4-maverick` | 1 | HuggingFace |
 | `minimax-m2.7` | 1 | LLM7.io |
 | `mistral-large` | 1 | Mistral |
+| `north-mini-code` | 1 | OpenRouter |
 | `openrouter-free` | 1 | OpenRouter |
 | `qwen3-235b` | 1 | HuggingFace |
 | `qwen3-next-80b-a3b` | 1 | HuggingFace |
-| `qwen3.6-35b-a3b` | 1 | Hetzner |
 | `qwen3.8-27b` | 1 | Hetzner |
 <!-- END GENERATED MODEL MATRIX -->
 
 **Note on `gemma-3-12b-it`**: removed in June 2026 (Google retired the gemma-3 series; no free provider offers it anymore). Replacement: `gemma-4-26b-a4b-it` and `gemma-4-31b-it`.
 
-**Provider-redundancy rule:** chat models require ≥ 2 deployments except the documented exceptions in `render-config.py`. `mistral-large`/`command-r-plus` lost GitHub Models; `qwen3-next-80b-a3b` lost its OpenRouter free route; the Z.AI Flash and current OpenRouter-only aliases have no second zero-price host. Provider-specific embedding aliases are exempt because vectors from different models cannot be mixed safely; their explicit empty fallback chains are enforced by `tests/test_config_invariants.py`.
+**Provider-redundancy rule:** chat models require ≥ 2 deployments except the documented exceptions in `render-config.py`. `mistral-large`/`command-r-plus` lost GitHub Models; `qwen3-next-80b-a3b` lost its OpenRouter free route; the Z.AI Flash and current OpenRouter-only aliases have no second zero-price host; `glm-5.2`, `llama-4-maverick`, and `inkling-small` lost their second host in the 2026-08-24 sync (NVIDIA end-of-life; OpenRouter's `inkling-small:free` is gated to agentic harnesses). Provider-specific embedding aliases are exempt because vectors from different models cannot be mixed safely; their explicit empty fallback chains are enforced by `tests/test_config_invariants.py`.
 
 ### Multi-Instance (additional)
 
-Master config (with every provider key configured): 149 base + 146 slave = **295 deployments**. Each slave reuses the rendered base config with its own keys → effectively 3× rate limit per provider.
+Master config (with every provider key configured): 143 base + 148 slave = **291 deployments**. Each slave reuses the rendered base config with its own keys → effectively 3× rate limit per provider.
 
 ---
 
@@ -208,9 +209,32 @@ router_settings:
   # REDIS_HOST is set; then cross-instance tracking + cooldowns
   num_retries: 1
   retry_after: 1
-  allowed_fails: 1
   cooldown_time: 60
+  # model_group_retry_policy: generated by render-config.py
 ```
+
+**`allowed_fails` is deliberately unset** (invariant test): setting it switches
+`Router._should_cooldown_deployment()` to the legacy per-minute failure counter,
+which cools a deployment down only on the *second* failure and skips the modern
+rule "HTTP 429 → cool this deployment down immediately" (verified against
+LiteLLM v1.97.0). Rate limits are the dominant failure mode here. Trade-off:
+non-429 failures now need >50% failures across ≥ 5 requests to the same
+deployment within a minute, so at low traffic a broken backend costs one failed
+attempt per request before retry/fallback takes over. Note also that HTTP 402
+(HuggingFace out of credits) never triggers a cooldown in either mode.
+
+**`model_group_retry_policy` is generated** by `render-config.py` between the
+`# BEGIN/END GENERATED SINGLE-DEPLOYMENT RETRY POLICY` markers: every model_name
+left with a single deployment after the provider filter gets
+`RateLimitErrorRetries: 0`. Reason: with two or more deployments the router
+retries instantly (`_time_to_sleep_before_retry` returns 0 while healthy
+deployments exist), but a single-deployment group honours `Retry-After` — and
+LiteLLM's own rpm/tpm error ships `retry-after: 60`, so the caller waited a full
+minute before the fallback chain was even tried (measured 61s on
+`lfm-2.5-2.6b` and `embedding-liquid`; 1.3s after the policy). Per-deployment
+`num_retries: 0` does not fix this: the override is only stamped onto the
+exception in the `(a)completion` path, never for embeddings, and not at all when
+the router rejects the call before picking a deployment.
 
 `tpm`/`rpm` live per-deployment in **`litellm_params`** (not top level!) so the router evaluates them. An invariant test enforces this. Load-tested GPT-OSS, Llama 3.3 70B, and Gemma 4 31B deployments use `timeout: 20`; embeddings use 15s, speech 60s, and transcription 120s. Every explicit tier uses `num_retries: 1`; unclassified chat models inherit the conservative 30s global ceiling.
 
@@ -301,7 +325,7 @@ docker compose up -d
 ## 7. Status & Known Limitations
 
 ### Completed (as of 2026-08-19)
-- ✅ 16 providers integrated, 73 model_names / 149 template deployments
+- ✅ 16 providers integrated, 74 model_names / 143 template deployments
 - ✅ Redis cache + auth cache, **conditionally rendered** (without REDIS_HOST → Redis-free)
 - ✅ `usage-based-routing-v2` with Redis tracking; tpm/rpm in litellm_params
 - ✅ Password flow: no more committed defaults; Compose enforces passwords (`:?`),
@@ -400,8 +424,9 @@ kubectl apply -k k8s/           # K8s variant (uses ../../k8s/redis as a base)
 4. **Cost comparison** (hypothetical paid-tier price) from the LiteLLM reference DB, 24h cache under `.cache/litellm-prices.json`.
 5. **Apply-plan mapping**: normalized group names are mapped onto the template's descriptive `model_names` (plus global dedup) — existing deployments are reliably recognized as `skip` instead of being planned as a duplicate. Provider detection in the template uses the api_base discrimination from `render-config.py` (NVIDIA/GitHub/Zen/LLM7/OVH share the `openai/` prefix).
 6. **Stale-deployment detection** (the reverse of the apply plan): template deployments whose model is missing from the live catalog end up in their own report section ("Orphaned template deployments") — **report-only**, removals stay manual. Checked only against catalogs that were fetched successfully AND completely. Example find: the OVHcloud ID `Meta-Llama-3_3-...` (underscore) was mistakenly written with a dot in the template.
-7. `--apply` writes new deployments into the template (tpm/rpm in litellm_params!) and renders.
-8. `--emit-matrix`/`--write-docs` generate the docs matrix (§3).
+7. **Dead-route denylist**: `DEAD_ROUTES` in `find-shared-models.py` drops catalog entries that live tests proved unusable on the free tier (OpenRouter `inkling`/`inkling-small` are gated to agentic harnesses, NVIDIA `kimi-k2.6` is listed but returns 404). Without it every sync would re-propose them, because discovery only sees the listing, not the call result. Add an entry only with the live evidence and its date.
+8. `--apply` writes new deployments into the template (tpm/rpm in litellm_params!) and renders.
+9. `--emit-matrix`/`--write-docs` generate the docs matrix (§3).
 
 **Important insight:** `input_cost_per_token`/`output_cost_per_token` in the report show the _paid-tier_ price; in `config.yaml` the model_info costs stay documentary — routing remains free-tier.
 

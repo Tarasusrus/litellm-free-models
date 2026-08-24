@@ -80,6 +80,33 @@ def generate_slave_entries(model_names, slaves):
     return entries
 
 
+def strip_retry_policy(lines):
+    """
+    Drops the generated `model_group_retry_policy` block.
+
+    render-config.py adds `RateLimitErrorRetries: 0` for model groups that are
+    down to a single deployment, so a Retry-After cannot stall the fallback
+    chain. The master mirrors every model_name onto its slaves, so no group is
+    single there any more -- keeping the policy would send a rate-limited
+    request straight to the fallback chain instead of retrying on a slave.
+    The slave ConfigMap reuses the base config unchanged and keeps the policy.
+    """
+    out = []
+    in_policy = False
+    for line in lines:
+        if line.startswith("  model_group_retry_policy:"):
+            in_policy = True
+            continue
+        if in_policy:
+            # Block members are indented deeper than the key itself.
+            if line.strip() and not line.startswith("    "):
+                in_policy = False
+            else:
+                continue
+        out.append(line)
+    return out
+
+
 def write_plain_yaml(lines, slave_entries, ml_end, path):
     output = lines[:ml_end] + slave_entries + lines[ml_end:]
     with open(path, "w") as f:
@@ -135,6 +162,7 @@ def generate(slaves, output_path, k8s_configmap=False):
     with open(BASE_CONFIG) as f:
         lines = f.readlines()
 
+    lines = strip_retry_policy(lines)
     entries, ml_start, ml_end = parse_model_list(lines)
 
     seen = set()

@@ -394,6 +394,58 @@ class TestEndToEndRender(unittest.TestCase):
             # OPENROUTER_API_KEY is set -> openrouter-free is appended
             self.assertIn("openrouter-free", content)
 
+class TestSingleDeploymentRetryPolicy(unittest.TestCase):
+    """A model group with one deployment honours Retry-After (up to 60s)
+    before the fallback chain is tried -- LiteLLM's own rate-limit error even
+    ships "retry-after: 60". RateLimitErrorRetries: 0 sends those groups
+    straight to the fallback layer instead."""
+
+    def _blocks(self, names):
+        return [{"model_name": n} for n in names]
+
+    def test_only_single_deployment_groups_are_listed(self):
+        blocks = self._blocks(["gpt-oss-20b", "gpt-oss-20b", "lfm-2.5-2.6b"])
+        self.assertEqual(rc.single_deployment_model_names(blocks), ["lfm-2.5-2.6b"])
+
+    def test_exceptions_and_non_chat_aliases_are_included(self):
+        # Unlike single_deployment_warnings(), the retry policy must also
+        # cover the documented single-provider exceptions and the embedding
+        # aliases -- the stall hits them just the same.
+        blocks = self._blocks(["big-pickle", "embedding-liquid", "gpt-oss-20b", "gpt-oss-20b"])
+        self.assertEqual(
+            rc.single_deployment_model_names(blocks),
+            ["big-pickle", "embedding-liquid"],
+        )
+
+    def test_policy_replaces_marker_region(self):
+        lines = [
+            "router_settings:\n",
+            "  num_retries: 1\n",
+            "  # BEGIN GENERATED SINGLE-DEPLOYMENT RETRY POLICY (render-config.py)\n",
+            "  stale: leftover\n",
+            "  # END GENERATED SINGLE-DEPLOYMENT RETRY POLICY\n",
+            "  fallbacks:\n",
+        ]
+        out = "".join(rc.insert_retry_policy(lines, ["lfm-2.5-2.6b"]))
+        self.assertIn("  model_group_retry_policy:\n    lfm-2.5-2.6b:\n      RateLimitErrorRetries: 0\n", out)
+        self.assertNotIn("stale: leftover", out)
+        self.assertNotIn("BEGIN GENERATED", out)
+        self.assertIn("  fallbacks:\n", out)
+
+    def test_no_singles_leaves_no_empty_key(self):
+        lines = [
+            "  # BEGIN GENERATED SINGLE-DEPLOYMENT RETRY POLICY (render-config.py)\n",
+            "  # END GENERATED SINGLE-DEPLOYMENT RETRY POLICY\n",
+            "  fallbacks:\n",
+        ]
+        out = "".join(rc.insert_retry_policy(lines, []))
+        self.assertEqual(out, "  fallbacks:\n")
+
+    def test_template_without_markers_is_untouched(self):
+        lines = ["router_settings:\n", "  num_retries: 1\n"]
+        self.assertEqual(rc.insert_retry_policy(lines, ["x"]), lines)
+
+
 
 if __name__ == "__main__":
     unittest.main()

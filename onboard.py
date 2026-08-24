@@ -71,7 +71,8 @@ PROVIDER_KEYS: list[tuple[str, str, str, str]] = [
     ("OPENCODE_ZEN_API_KEY", "OpenCode Zen", "https://opencode.ai/zen", ""),
     ("LLM7IO_API_KEY", "LLM7.io", "https://dash.llm7.io",
      "'unused' = anonymous tier (10 RPM); free token = 40 RPM."),
-    ("HF_TOKEN", "HuggingFace", "https://huggingface.co/settings/tokens", ""),
+    ("HF_TOKEN", "HuggingFace", "https://huggingface.co/settings/tokens",
+     "Monthly included credit budget (~$0.10 free); HTTP 402 once it is spent."),
     ("OVHCLOUD_API_KEY", "OVHcloud", "https://www.ovhcloud.com/en/public-cloud/ai-endpoints/",
      "Leave empty = anonymous free tier (2 RPM/IP/model), perfectly fine."),
 ]

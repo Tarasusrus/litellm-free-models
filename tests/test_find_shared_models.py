@@ -680,6 +680,19 @@ class TestGenerateApplyPlan(unittest.TestCase):
         plan = fsm.generate_apply_plan(groups, {}, self._existing(), None)
         self.assertTrue(all(p["action"] == "skip" for p in plan))
 
+    def test_dead_routes_are_never_proposed(self):
+        # Live-verified unusable free routes (DEAD_ROUTES) must not come
+        # back with the next catalog sync, even though the provider still
+        # advertises them.
+        groups = {fsm.normalize("thinkingmachines/inkling-small:free"): {
+            "openrouter": ["thinkingmachines/inkling-small:free"],
+            "huggingface": ["thinkingmachines/Inkling-Small"],
+        }}
+        plan = fsm.generate_apply_plan(groups, {}, {}, None)
+        providers = {p["provider"] for p in plan}
+        self.assertNotIn("openrouter", providers)
+        self.assertEqual(providers, {"huggingface"})
+
     def test_new_group_gets_pretty_name_not_raw_grouping_key(self):
         # Regression: a completely NEW group (no existing match) used to
         # get the aggressively STOPWORDS-cleaned grouping key as its
@@ -782,6 +795,29 @@ class TestFindStaleDeployments(unittest.TestCase):
             }
             stale = fsm.find_stale_deployments(tmpl, raw, partial={"groq"})
             self.assertEqual(stale, [])
+
+    def test_case_only_drift_is_reported_for_huggingface(self):
+        # Regression: huggingface/google/gemma-4-31b-it sat in the template
+        # for weeks while the catalog spelled it gemma-4-31B-it -- the
+        # route answered HTTP 400, but the case-insensitive comparison
+        # reported it as healthy.
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as d:
+            tmpl = Path(d) / "tmpl.yaml"
+            tmpl.write_text(
+                "model_list:\n"
+                "\n"
+                "  - model_name: gemma-4-31b-it\n"
+                "    litellm_params:\n"
+                "      model: huggingface/google/gemma-4-31b-it\n"
+                "      api_key: {{HF_TOKEN}}\n"
+            )
+            raw = {"huggingface": ["google/gemma-4-31B-it"]}
+            stale = fsm.find_stale_deployments(tmpl, raw, partial=set())
+            self.assertEqual(len(stale), 1)
+            self.assertEqual(stale[0]["kind"], "case")
+            self.assertEqual(stale[0]["catalog_id"], "google/gemma-4-31B-it")
 
     def test_case_insensitive_match(self):
         import tempfile

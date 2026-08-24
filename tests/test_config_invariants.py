@@ -189,10 +189,13 @@ class TestFailFastRouting(unittest.TestCase):
         for setting in (
             "  num_retries: 1\n",
             "  retry_after: 1\n",
-            "  allowed_fails: 1\n",
             "  cooldown_time: 60\n",
         ):
             self.assertIn(setting, router)
+        # allowed_fails must stay UNSET: setting it switches the router to the
+        # legacy cooldown counter, which only reacts to the second failure per
+        # minute and skips "HTTP 429 -> cool down immediately".
+        self.assertNotIn("\n  allowed_fails:", router)
 
 
 class TestLLM7TemplateFreeOnly(unittest.TestCase):
@@ -209,7 +212,8 @@ class TestLLM7TemplateFreeOnly(unittest.TestCase):
             "DeepSeek-V4-Flash-0731",
             "codestral-latest",
             "gemini-3.1-flash-lite",
-            "gpt-oss:20b",
+            # gpt-oss:20b left the LLM7 catalog on 2026-08-24 and answers
+            # "currently unavailable" (HTTP 400) -- deployment removed.
             "minimax-m2.7",
             "mistral-Nemo-Instruct-2407",
         })

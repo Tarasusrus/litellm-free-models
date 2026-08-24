@@ -67,5 +67,42 @@ class TestParseModelList(unittest.TestCase):
         # 4 Bloecke = 20 Zeilen
 
 
+class TestStripRetryPolicy(unittest.TestCase):
+    """The master mirrors every model_name onto its slaves, so the
+    single-deployment retry policy from the base config no longer applies
+    there -- keeping it would skip the retry on a slave and jump straight to
+    the fallback chain."""
+
+    def _lines(self):
+        return [
+            "router_settings:\n",
+            "  num_retries: 1\n",
+            "  model_group_retry_policy:\n",
+            "    embedding-liquid:\n",
+            "      RateLimitErrorRetries: 0\n",
+            "    big-pickle:\n",
+            "      RateLimitErrorRetries: 0\n",
+            "  fallbacks:\n",
+            "    - {\"a\": [\"b\"]}\n",
+        ]
+
+    def test_policy_block_removed(self):
+        out = gc.strip_retry_policy(self._lines())
+        self.assertNotIn("  model_group_retry_policy:\n", out)
+        self.assertNotIn("    embedding-liquid:\n", out)
+        self.assertNotIn("      RateLimitErrorRetries: 0\n", out)
+
+    def test_surrounding_settings_survive(self):
+        out = gc.strip_retry_policy(self._lines())
+        self.assertEqual(out[0], "router_settings:\n")
+        self.assertEqual(out[1], "  num_retries: 1\n")
+        self.assertIn("  fallbacks:\n", out)
+        self.assertIn("    - {\"a\": [\"b\"]}\n", out)
+
+    def test_config_without_policy_is_unchanged(self):
+        lines = ["router_settings:\n", "  num_retries: 1\n"]
+        self.assertEqual(gc.strip_retry_policy(lines), lines)
+
+
 if __name__ == "__main__":
     unittest.main()
