@@ -1,6 +1,6 @@
 [project]
 name = "litellm-free-models"
-version = "0.1.0"
+version = "0.3.0"
 description = "LiteLLM proxy that aggregates free LLM APIs from multiple providers, with load balancing, cooldown, and fallback chains."
 requires-python = ">=3.10"
 license = { text = "MIT" }

@@ -5,8 +5,20 @@ Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-24
+
 ### Added
 
+- Documented that HuggingFace Inference is credit-metered: once the monthly
+  included budget is spent, every HF route answers HTTP 402 until the period
+  resets, and backend pinning does not avoid it.
+- Added a `DEAD_ROUTES` denylist to catalog discovery so live-verified
+  unusable free routes are never re-proposed by the weekly sync, with a
+  regression test.
+- Added six free deployments from the 2026-08-24 catalog sync: the new
+  `inkling-small` alias on HuggingFace, `kimi-k3` on NVIDIA, `laguna-xs-2.1`
+  on Poolside, and `qwen3.6-35b-a3b` on HuggingFace (which restores provider
+  redundancy for the former Hetzner exclusive).
 - Added the current free LLM7 `gemini-3.1-flash-lite` and `minimax-m2.7`
   routes after live authenticated tests.
 - Hetzner Experiments Inference as the sixteenth free provider, with
@@ -16,17 +28,45 @@ Semantic Versioning.
 
 ### Fixed
 
+- Stopped single-deployment model groups from stalling a full minute on a
+  rate limit: `render-config.py` now generates a `model_group_retry_policy`
+  with `RateLimitErrorRetries: 0` for every model_name left with one
+  deployment, so the fallback chain is tried immediately (measured 61s ->
+  1.3s on `lfm-2.5-2.6b`). Per-deployment `num_retries: 0` could not do this,
+  because LiteLLM only stamps that override onto exceptions raised in the
+  `(a)completion` path.
+- Removed `allowed_fails: 1` from `router_settings`: it forced the router onto
+  the legacy cooldown counter (cooldown only on the second failure per minute)
+  and disabled the modern "HTTP 429 -> cool down immediately" rule. An
+  invariant test now keeps the setting unset.
+- Fixed the miscased HuggingFace repo IDs for `gemma-4-31b-it` and
+  `gemma-4-26b-a4b-it` (the router serves `gemma-4-31B-it` /
+  `gemma-4-26B-A4B-it` and answered HTTP 400 for the lowercase spelling),
+  and taught the stale-deployment check to report case-only drift for
+  case-sensitive catalogs instead of silently accepting it.
+- Removed twelve dead deployments confirmed by live tests on 2026-08-24:
+  NVIDIA end-of-life routes for `kimi-k2.6`, `deepseek-v4-flash`, `glm-5.2`,
+  and `llama-4-maverick`; Cloudflare `@cf/moonshotai/kimi-k2.6` (excluded from
+  the Workers Free plan); HuggingFace `nvidia/Nemotron-3-Nano-30B-A3B`;
+  OpenCode Zen `north-mini-code-free`; the OpenRouter and LLM7 `gpt-oss-20b`
+  routes (paid-only / unavailable); and the OpenRouter `inkling` and
+  `inkling-small` free routes, which are gated to agentic harnesses (HTTP 403).
+- Corrected three renamed provider model IDs: Cloudflare
+  `llama-4-scout-17b-16e-instruct` and `llama-3.1-8b-instruct-fp8`, and
+  HuggingFace `Llama-4-Maverick-17B-128E-Instruct-FP8`.
 - Restricted LLM7 discovery and routing to live `turbo` models with
   `usage_based_only: false`; removed ten stale or paid LLM7 deployments and
   updated anonymous/free-token limits and dashboard URLs.
 - Made OpenRouter `embedding-liquid` fail fast (`timeout: 5`, no retry) so a
   free-tier `Retry-After: 60` response cannot hide a one-minute stall behind
-  the successful retry's sub-second provider duration.
+  the successful retry's sub-second provider duration. The per-deployment
+  `num_retries` part of this turned out to be inert; the model-group retry
+  policy above is what actually removes the stall.
 - Prevented slow `gpt-oss-120b` providers from consuming the former 120-second
   per-attempt timeout under concurrent uncached load. Both GPT-OSS pools now
   use a 20-second deployment timeout and one retry; router defaults use a
-  one-second retry delay, cooldown after one failure for 60 seconds, and a
-  30-second ceiling for other deployments.
+  one-second retry delay, a 60-second cooldown, and a 30-second ceiling for
+  other deployments.
 - Documented that routing/load tests must use unique prompts and explicitly
   bypass the five-minute Redis response cache.
 - Verified the fix with 24 unique requests at concurrency four: 24/24
@@ -36,6 +76,18 @@ Semantic Versioning.
   Gemma 4 31B pools now fail over after 20 seconds, embeddings after 15
   seconds, while speech (60s) and transcription (120s) retain media-safe
   limits. Other chat deployments inherit the 30-second global ceiling.
+
+### Verified
+
+- Live provider tests for every added, corrected, and removed deployment
+  (HTTP 200/400/402/403/410 recorded per route on 2026-08-24).
+- Rate-limit failover measured against a running proxy: a single-deployment
+  group went from a 61-second stall to a 1.3-second fallback, a rate-limited
+  embedding alias from 61 seconds to 50 milliseconds, and multi-deployment
+  groups keep switching providers in under a second without an error.
+- Lint, 141 tests, config render without redundancy warnings, LiteLLM boot
+  against the rendered config, Compose validation, 23 Kubernetes resources,
+  and generated documentation drift.
 
 ## [0.2.0] - 2026-08-19
 
@@ -95,5 +147,6 @@ Semantic Versioning.
 
 - Initial public release.
 
+[0.3.0]: https://github.com/natorus87/litellm-free-models/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/natorus87/litellm-free-models/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/natorus87/litellm-free-models/releases/tag/v0.1.0
