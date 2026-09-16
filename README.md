@@ -66,7 +66,7 @@ reply = client.chat.completions.create(
     model="standard",
     messages=[{"role": "user", "content": "Say hi in one word."}],
 )
-print(reply.choices[0].message.content, "| served by:", reply.model)
+print(reply.choices[0].message.content)
 ```
 
 Every upstream alias (`gpt-oss-120b`, `llama-3.3-70b-instruct`, embeddings,

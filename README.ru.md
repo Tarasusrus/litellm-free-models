@@ -67,7 +67,7 @@ reply = client.chat.completions.create(
     model="standard",
     messages=[{"role": "user", "content": "Скажи привет одним словом."}],
 )
-print(reply.choices[0].message.content, "| ответил:", reply.model)
+print(reply.choices[0].message.content)
 ```
 
 Все апстримные алиасы (`gpt-oss-120b`, `llama-3.3-70b-instruct`, эмбеддинги,

@@ -49,14 +49,14 @@ curl -s http://localhost:4444/v1/chat/completions \
 grep -i '^x-litellm-model' /tmp/headers.txt
 ```
 
-Response — standard OpenAI shape. `model` is the backend model that
-actually answered, not `standard`:
+Response — standard OpenAI shape. `model` echoes the name you asked for;
+the backend that actually answered is in the response headers (below):
 
 ```json
 {
   "id": "chatcmpl-…",
   "object": "chat.completion",
-  "model": "gemini-3.5-flash-lite",
+  "model": "standard",
   "choices": [{"index": 0, "message": {"role": "assistant", "content": "Paris."}, "finish_reason": "stop"}],
   "usage": {"prompt_tokens": 17, "completion_tokens": 2, "total_tokens": 19}
 }
@@ -76,7 +76,7 @@ raw = client.chat.completions.with_raw_response.create(
 )
 reply = raw.parse()
 print(reply.choices[0].message.content)
-print("served by:", reply.model, raw.headers.get("x-litellm-model-id"))
+print("served by:", raw.headers.get("x-litellm-model-name"), raw.headers.get("x-litellm-model-api-base"))
 ```
 
 Streaming (`"stream": true`) is supported as usual.
@@ -87,12 +87,13 @@ Response headers tell which deployment served the request:
 
 | Header | Meaning |
 |---|---|
-| `x-litellm-model-id` | id of the deployment (stable per model + provider; `GET /model/info` maps ids to `litellm_params.model` / `api_base`) |
-| `x-litellm-model-api-base` | provider endpoint that answered |
+| `x-litellm-model-name` | LiteLLM model id of the backend, e.g. `gemini/gemini-3.5-flash-lite`, `openai/codestral-latest` |
+| `x-litellm-model-api-base` | provider endpoint that answered (tells the host apart for `openai/*` ids) |
+| `x-litellm-model-id` | stable id of the deployment; `GET /model/info` maps ids to `litellm_params` |
 | `x-litellm-model-group` | the model name you asked for (`standard`) |
 | `x-litellm-attempted-fallbacks` | how many deployments failed before this one (absent when the first one answered) |
 
-The response body's `model` field carries the provider's model name.
+The response body's `model` field is the requested name (`standard`), not the backend.
 
 ## Structured output (`response_format`)
 
@@ -158,6 +159,7 @@ The proxy answers with the OpenAI error envelope:
 | `500`/`502`/`503`/`504` | the chain ended on a provider error or timeout |
 
 When the whole `standard` chain fails, the status is that of the *last*
-attempt and `message` names the failing deployments. Retry after a minute:
+attempt and `message` carries that provider's error plus
+`Received Model Group=standard`. Retry after a minute:
 cooled-down deployments return to the chain automatically
 (`cooldown_time: 60`).
