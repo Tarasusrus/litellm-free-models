@@ -47,8 +47,8 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      # Property-based tests (tests/test_smoke_json_schema.py,
-      # tests/test_vacancy_parse.py) need hypothesis; everything else is stdlib.
+      # Fork: property-based tests (tests/test_smoke_json_schema.py,
+      # tests/test_standard_route.py) need hypothesis; everything else is stdlib.
       - name: Install test dependencies
         run: pip install -r requirements-dev.txt
 
@@ -63,22 +63,23 @@ jobs:
           sed -i 's/^REDIS_PASSWORD=$/REDIS_PASSWORD=ci-dummy-password/' .env
           sed -i 's/^POSTGRES_PASSWORD=$/POSTGRES_PASSWORD=ci-dummy-password/' .env
 
+      # Fork: fork/render.py = upstream render-config.py + the `standard` route
       - name: Smoke-test render-config (dry-run)
-        run: python3 render-config.py --dry-run
+        run: python3 fork/render.py --dry-run
 
       - name: Full render + multi-instance generate
         run: |
-          python3 render-config.py
-          python3 render-config.py --no-redis --output config.check.yaml
+          python3 fork/render.py
+          python3 fork/render.py --no-redis --output config.check.yaml
           cd multi-instance && python3 generate-config.py
 
       - name: Matrix generator (docs drift check)
         run: |
           python3 find-shared-models.py --write-docs
-          if ! git diff --quiet -- AGENTS.md README.md; then
-            echo "::error::Deployment matrix in AGENTS.md/README.md is out of date."
+          if ! git diff --quiet -- AGENTS.md docs/upstream-README.md; then
+            echo "::error::Deployment matrix in AGENTS.md/docs/upstream-README.md is out of date."
             echo "Please run 'python3 find-shared-models.py --write-docs' locally and commit."
-            git diff -- AGENTS.md README.md | head -80
+            git diff -- AGENTS.md docs/upstream-README.md | head -80
             exit 1
           fi
 
@@ -108,7 +109,7 @@ jobs:
 
       - name: Render configs (for ConfigMaps + Compose mounts)
         run: |
-          python3 render-config.py
+          python3 fork/render.py
           (cd multi-instance && python3 generate-config.py)
           make k8s-configmap
 
