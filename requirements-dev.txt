@@ -1,3 +1,4 @@
 # Only needed for development. The main scripts have NO external dependencies.
 ruff==0.6.9
 pre-commit==3.8.0
+hypothesis==6.163.0
