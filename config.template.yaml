@@ -1983,6 +1983,70 @@ model_list:
       output_cost_per_token: 0
       mode: chat
 
+  # ===========================================================================
+  # FORK SECTION -- vacancy-parse (job-hunt client, strict json_schema)
+  # ===========================================================================
+  # Not synced by find-shared-models.py. Every deployment below passed
+  # tools/smoke-json-schema.py 5/5 (JSON_SCHEMA_VERIFIED); the chain
+  # vacancy-parse -> vacancy-parse-fallback -> [] never reaches '*', where
+  # drop_params would silently swallow response_format.
+  # Enforced by tests/test_vacancy_parse.py. Keep this section last.
+  - model_name: vacancy-parse
+    litellm_params:
+      model: gemini/gemini-3.5-flash-lite
+      api_key: os.environ/GEMINI_API_KEY
+      tpm: 250000
+      rpm: 10
+      timeout: 30
+      num_retries: 1
+    model_info:
+      input_cost_per_token: 0
+      output_cost_per_token: 0
+      mode: chat
+
+  - model_name: vacancy-parse
+    litellm_params:
+      model: gemini/gemini-3.1-flash-lite
+      api_key: os.environ/GEMINI_API_KEY
+      tpm: 250000
+      rpm: 10
+      timeout: 30
+      num_retries: 1
+    model_info:
+      input_cost_per_token: 0
+      output_cost_per_token: 0
+      mode: chat
+
+  # Second tier without a Gemini quota dependency: LLM7 anonymous tier
+  # (10 RPM shared across all LLM7 models -> conservative rpm per deployment).
+  - model_name: vacancy-parse-fallback
+    litellm_params:
+      model: openai/codestral-latest
+      api_key: os.environ/LLM7IO_API_KEY
+      api_base: https://api.llm7.io/v1
+      tpm: 200000
+      rpm: 4
+      timeout: 30
+      num_retries: 1
+    model_info:
+      input_cost_per_token: 0
+      output_cost_per_token: 0
+      mode: chat
+
+  - model_name: vacancy-parse-fallback
+    litellm_params:
+      model: openai/mistral-Nemo-Instruct-2407
+      api_key: os.environ/LLM7IO_API_KEY
+      api_base: https://api.llm7.io/v1
+      tpm: 200000
+      rpm: 4
+      timeout: 30
+      num_retries: 1
+    model_info:
+      input_cost_per_token: 0
+      output_cost_per_token: 0
+      mode: chat
+
 # =============================================================================
 # Router Settings  –  Load Balancing, Fallback & Cooldown
 # =============================================================================
@@ -2047,6 +2111,10 @@ router_settings:
     - {"elevenlabs-scribe-v2": []}
     - {"whisper-large-v3": []}
     - {"whisper-large-v3-turbo": []}
+    # Fork: json_schema-verified chain (render-config.py SCHEMA_PINNED_FALLBACKS
+    # keeps it as written -- no openrouter-free, explicit [] survives).
+    - {"vacancy-parse":             ["vacancy-parse-fallback"]}
+    - {"vacancy-parse-fallback":    []}
     - {"gpt-oss-120b":              ["gpt-oss-20b", "llama-3.3-70b-instruct", "nemotron-3-120b", "mistral-large"]}
     - {"llama-3.3-70b-instruct":    ["llama-3.1-8b", "mistral-large", "gpt-oss-20b", "gemma-4-26b-a4b-it"]}
     - {"gpt-oss-20b":               ["llama-3.1-8b", "gemma-4-26b-a4b-it", "deepseek-v4-flash", "mistral-large"]}

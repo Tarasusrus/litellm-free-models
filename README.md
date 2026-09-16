@@ -218,7 +218,7 @@ the displayed values are conservative local routing budgets, not provider claims
 ## 🤖 Models
 
 <!-- BEGIN GENERATED MODEL MATRIX (python3 find-shared-models.py --write-docs) -->
-Snapshot (generated from `config.template.yaml`): **74 model_names, 143 base deployments**. `render-config.py` removes deployments from providers without an API key in `.env` — the effective count can therefore be lower.
+Snapshot (generated from `config.template.yaml`): **76 model_names, 147 base deployments**. `render-config.py` removes deployments from providers without an API key in `.env` — the effective count can therefore be lower.
 
 | model_name | Deployments | Provider |
 |---|---|---|
@@ -266,6 +266,8 @@ Snapshot (generated from `config.template.yaml`): **74 model_names, 143 base dep
 | `qwen3.5-9b` | 2 | HuggingFace, OVHcloud |
 | `qwen3.6-35b-a3b` | 2 | Hetzner, HuggingFace |
 | `step-3.7-flash` | 2 | NVIDIA, HuggingFace |
+| `vacancy-parse` | 2 | Google AI Studio |
+| `vacancy-parse-fallback` | 2 | LLM7.io |
 | `whisper-large-v3` | 2 | Groq, OVHcloud |
 | `whisper-large-v3-turbo` | 2 | Groq, OVHcloud |
 | `audio-speech` | 1 | Groq |
