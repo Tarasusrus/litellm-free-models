@@ -47,6 +47,11 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      # Property-based tests (tests/test_smoke_json_schema.py,
+      # tests/test_vacancy_parse.py) need hypothesis; everything else is stdlib.
+      - name: Install test dependencies
+        run: pip install -r requirements-dev.txt
+
       # make test runs without a pipe – failing tests turn the job red
       # (`| tail -5` used to swallow the unittest exit code).
       - name: Run tests (incl. config invariants)
