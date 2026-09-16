@@ -2,15 +2,17 @@
 """
 Renders config.yaml = upstream render-config.py + the fork's additions.
 
-Drop-in for `python3 render-config.py` (same flags). Upstream's renderer
-runs untouched first; this script then post-processes its output:
+Drop-in for `python3 render-config.py` (same flags).
 
-  1. Appends the `standard` deployments to model_list -- every chat
+  0. Prepends fork/models.yaml (deployments upstream does not carry) to
+     the template's model_list, in a temporary copy of the template.
+  1. Runs upstream's renderer on it, untouched.
+  2. Appends the `standard` deployments to model_list -- every chat
      deployment that survived the provider filter, copied with a unique
      `order` (fork/standard.py).
-  2. Pins `{"standard": []}` in router_settings.fallbacks, so the route
+  3. Pins `{"standard": []}` in router_settings.fallbacks, so the route
      ends explicitly instead of drifting into the catch-all '*'.
-  3. Sets `router_settings.max_fallbacks` to the chain length: LiteLLM's
+  4. Sets `router_settings.max_fallbacks` to the chain length: LiteLLM's
      order-based fallback walks one order level per hop and stops at
      max_fallbacks (default 5), which would leave most of the chain untried.
 
@@ -27,6 +29,7 @@ import importlib.util
 import os
 import re
 import sys
+import tempfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -46,6 +49,19 @@ def _load_upstream_renderer():
 
 
 rc = _load_upstream_renderer()
+
+FORK_MODELS = REPO_ROOT / "fork" / "models.yaml"
+
+
+def merged_template_text(template_path: Path, fragment_path: Path = FORK_MODELS) -> str:
+    """Upstream template with the fork fragment first in model_list."""
+    text = template_path.read_text(encoding="utf-8")
+    if not fragment_path.exists():
+        return text
+    marker = "model_list:\n"
+    if marker not in text:
+        raise RuntimeError(f"model_list not found in {template_path}")
+    return text.replace(marker, marker + fragment_path.read_text(encoding="utf-8"), 1)
 
 
 def _model_list_end(lines: list[str]) -> int:
@@ -98,7 +114,13 @@ def pin_fallbacks(lines: list[str], chain_len: int) -> list[str]:
 
 def render(template_path: Path, env_path: Path, output_path: Path,
            dry_run: bool = False, no_redis: bool = False) -> int:
-    rcode = rc.render(template_path, env_path, output_path, dry_run=dry_run, no_redis=no_redis)
+    if not template_path.exists():
+        print(f"ERROR: template not found: {template_path}", file=sys.stderr)
+        return 2
+    with tempfile.TemporaryDirectory() as d:
+        merged = Path(d) / template_path.name
+        merged.write_text(merged_template_text(template_path), encoding="utf-8")
+        rcode = rc.render(merged, env_path, output_path, dry_run=dry_run, no_redis=no_redis)
     if rcode != 0 or dry_run:
         return rcode
     env = rc.load_env(env_path)

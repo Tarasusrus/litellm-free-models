@@ -22,7 +22,8 @@ it.
 
 | Path | Role |
 |---|---|
-| `fork/render.py` | Drop-in for `render-config.py` (same flags). Runs upstream's renderer **unchanged**, then post-processes the output: appends the `standard` deployments, pins `{"standard": []}` in `fallbacks`, sets `router_settings.max_fallbacks`. |
+| `fork/render.py` | Drop-in for `render-config.py` (same flags). Prepends `fork/models.yaml` to a temporary copy of the template, runs upstream's renderer **unchanged** on it, then post-processes the output: appends the `standard` deployments, pins `{"standard": []}` in `fallbacks`, sets `router_settings.max_fallbacks`. |
+| `fork/models.yaml` | Deployments upstream's catalogue does not carry (today: Gemini flash-lite tier), in upstream's block format so the same filter and validation apply. Placed first in `model_list`, so they lead their provider in the `standard` chain. Tests reject entries that duplicate an upstream backend or reuse a non-chat alias. |
 | `fork/standard.py` | Provider priority (`PROVIDER_PRIORITY`), the chain builder (`chain`) and the YAML emitter (`render_blocks`). |
 | `fork/docker-entrypoint.sh` | Proxy entrypoint for compose: render inside the container, then start LiteLLM. |
 | `tests/test_standard_route.py` | Property tests for the chain and the rendered config. |
@@ -55,9 +56,10 @@ marked `# Fork:`; on a sync, keep ours.
   in `.env`). Anonymous tiers (`required=False`, today OVHcloud) join only
   with a key — an empty `api_key` is rejected by the OpenAI client inside
   LiteLLM before the request leaves.
-- One backend = (`model`, `api_base`). When several upstream aliases point
-  at the same backend, the first occurrence is used; the chain has no
-  duplicates.
+- One backend = (`model`, `api_base`). When several aliases point at the
+  same backend, the first occurrence is used; the chain has no duplicates.
+  Within a provider the order is `fork/models.yaml` first, then upstream's
+  template order.
 - Each deployment is copied verbatim under `model_name: standard` with
   `litellm_params.order = 1..N`. LiteLLM routes to the lowest `order`
   first and, on failure, walks up order by order (order-based fallbacks).

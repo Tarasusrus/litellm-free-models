@@ -23,6 +23,7 @@ rc = load_script("render-config.py")
 fork_render = load_script("fork/render.py")
 
 TEMPLATE = REPO_ROOT / "config.template.yaml"
+FORK_MODELS = REPO_ROOT / "fork" / "models.yaml"
 ROUTE = standard.ROUTE_NAME
 
 PROVIDERS = rc.PROVIDERS
@@ -146,11 +147,55 @@ def _render(env: dict, redis: bool) -> tuple[list[str], dict]:
 
 
 def _template_blocks(env: dict) -> list[dict]:
-    """Upstream template with {{VAR}} substituted, so api_base values are
-    comparable with the rendered output."""
-    text, _ = rc.substitute_placeholders(TEMPLATE.read_text(encoding="utf-8"), env)
+    """Fork fragment + upstream template with {{VAR}} substituted, so
+    api_base values are comparable with the rendered output. The fragment
+    goes first: fork-chosen deployments lead within their provider."""
+    text = TEMPLATE.read_text(encoding="utf-8").replace(
+        "model_list:\n", "model_list:\n" + FORK_MODELS.read_text(encoding="utf-8"), 1)
+    text, _ = rc.substitute_placeholders(text, env)
     _, _, blocks = rc.parse_blocks(text.splitlines(keepends=True))
     return blocks
+
+
+class TestForkModelsFragment(unittest.TestCase):
+    """fork/models.yaml: deployments upstream does not carry, in upstream's
+    block format so the same renderer filters and validates them."""
+
+    def setUp(self):
+        text = "model_list:\n" + FORK_MODELS.read_text(encoding="utf-8")
+        _, _, self.blocks = rc.parse_blocks(text.splitlines(keepends=True))
+        _, _, self.upstream = rc.parse_blocks(
+            TEMPLATE.read_text(encoding="utf-8").splitlines(keepends=True))
+
+    def test_fragment_is_well_formed_chat_with_known_provider(self):
+        self.assertTrue(self.blocks)
+        for b in self.blocks:
+            self.assertEqual(b.get("mode", "chat"), "chat", b["model_name"])
+            self.assertIn(b["provider"], PROVIDERS, b["model_id"])
+            self.assertTrue(any("rpm:" in ln for ln in b["lines"]), b["model_id"])
+
+    def test_fragment_adds_backends_upstream_lacks(self):
+        upstream_keys = {(b["model_id"], b["api_base"]) for b in self.upstream}
+        for b in self.blocks:
+            self.assertNotIn((b["model_id"], b["api_base"]), upstream_keys,
+                             f"{b['model_id']} already in upstream -- drop it from the fragment")
+
+    def test_fragment_never_reuses_a_non_chat_upstream_alias(self):
+        non_chat = {b["model_name"] for b in self.upstream if b.get("mode", "chat") != "chat"}
+        for b in self.blocks:
+            self.assertNotIn(b["model_name"], non_chat)
+
+    def test_fragment_deployments_lead_their_provider_in_the_chain(self):
+        env = {p.env_var: "x" for p in PROVIDERS.values() if p.env_var}
+        chain = standard.chain(_template_blocks(env), env)
+        fragment = {(b["model_id"], b["api_base"]) for b in self.blocks}
+        seen_upstream: set[str] = set()
+        for b in chain:
+            if (b["model_id"], b["api_base"]) in fragment:
+                self.assertNotIn(b["provider"], seen_upstream,
+                                 f"{b['model_id']} comes after an upstream {b['provider']} deployment")
+            else:
+                seen_upstream.add(b["provider"])
 
 
 class TestRenderedStandardRoute(unittest.TestCase):
