@@ -8,14 +8,15 @@ with prose. Nothing upstream notices. This script does: it sends a short
 Russian job ad with a strict JSON schema, parses the answer as JSON, and
 validates it against that schema. Any deviation is a failure.
 
-Deployments that pass 5/5 are recorded in JSON_SCHEMA_VERIFIED below; the
-`vacancy-parse` alias in config.template.yaml may only be built from that
-set (enforced by tests/test_vacancy_parse.py).
+Deployments that pass 5/5 are recorded in JSON_SCHEMA_VERIFIED below. It is
+a report, not a filter: the `standard` route keeps every provider in its
+chain, so a client that needs strict JSON validates the answer and retries
+(docs/USAGE.md). The table tells which deployments have been seen to comply.
 
 stdlib only. Examples:
 
-  python3 tools/smoke-json-schema.py --model vacancy-parse --n 5
-  python3 tools/smoke-json-schema.py --all-chat --n 2
+  python3 tools/smoke-json-schema.py --model standard --n 3
+  python3 tools/smoke-json-schema.py --all-chat --n 2 --no-fallback
   python3 tools/smoke-json-schema.py --model gpt-oss-20b --base-url http://host:4444
 
 Exit status 0 only if every attempt of every model passed.
@@ -35,18 +36,32 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-# Deployments (litellm `model:` ids) that returned schema-valid JSON on every
-# attempt of a live run through this script. Value = date of the last run.
-# Only these may back `vacancy-parse` -- see tests/test_vacancy_parse.py.
+# Deployments that returned schema-valid JSON on every attempt of a live run
+# through this script. Key = deployment_key(model, api_base): the same
+# `openai/<model>` id is served by several hosts (LLM7, NVIDIA, OVHcloud)
+# with different behaviour, so the host is part of the identity. Value =
+# date of the last run.
 JSON_SCHEMA_VERIFIED: dict[str, str] = {
     # Google AI Studio (free tier), 5/5 with --no-fallback
     "gemini/gemini-3.5-flash-lite": "2026-09-16",
     "gemini/gemini-3.1-flash-lite": "2026-09-16",
     "gemini/gemini-flash-lite-latest": "2026-09-16",
     # LLM7.io anonymous tier, 5/5 with --no-fallback
-    "openai/codestral-latest": "2026-09-16",
-    "openai/mistral-Nemo-Instruct-2407": "2026-09-16",
+    "openai/codestral-latest @ https://api.llm7.io/v1": "2026-09-16",
+    "openai/mistral-Nemo-Instruct-2407 @ https://api.llm7.io/v1": "2026-09-16",
 }
+
+KEY_SEP = " @ "
+
+
+def deployment_key(model: str, api_base: str = "") -> str:
+    """Identity of a deployment: litellm `model:` id plus its host."""
+    return f"{model}{KEY_SEP}{api_base}" if api_base else model
+
+
+def split_deployment_key(key: str) -> tuple[str, str]:
+    model, sep, api_base = key.partition(KEY_SEP)
+    return model, api_base if sep else ""
 
 MAX_VACANCY_CHARS = 300
 
@@ -251,13 +266,14 @@ def chat_model_names(info: list[dict]) -> list[str]:
 
 
 def deployment_index(info: list[dict]) -> dict[str, str]:
-    """x-litellm-model-id -> litellm `model:` id (what JSON_SCHEMA_VERIFIED records)."""
+    """x-litellm-model-id -> deployment_key (what JSON_SCHEMA_VERIFIED records)."""
     index: dict[str, str] = {}
     for entry in info:
         mid = (entry.get("model_info") or {}).get("id")
-        model = (entry.get("litellm_params") or {}).get("model")
+        params = entry.get("litellm_params") or {}
+        model = params.get("model")
         if mid and model:
-            index[mid] = model
+            index[mid] = deployment_key(model, params.get("api_base") or "")
     return index
 
 
@@ -360,7 +376,8 @@ def main() -> int:
     print()
     print("Deployments that answered schema-valid JSON (candidates for JSON_SCHEMA_VERIFIED):")
     for dep in sorted(verified_deployments(results)):
-        print(f"  {dep}")
+        known = f"  (verified {JSON_SCHEMA_VERIFIED[dep]})" if dep in JSON_SCHEMA_VERIFIED else ""
+        print(f"  {dep}{known}")
     return 0 if all_passed(results) else 1
 
 

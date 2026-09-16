@@ -73,14 +73,6 @@ SINGLE_PROVIDER_ALLOWED = {
 }
 
 
-# Fork: model groups whose fallback chain was verified live for strict
-# json_schema (tools/smoke-json-schema.py). The renderer leaves these chains
-# exactly as written in the template: no openrouter-free is appended and an
-# explicit empty chain survives, so a request never drifts into the
-# catch-all '*', where drop_params would silently swallow response_format.
-SCHEMA_PINNED_FALLBACKS = {"vacancy-parse", "vacancy-parse-fallback"}
-
-
 def load_env(path: Path) -> dict[str, str]:
     env: dict[str, str] = {}
     if not path.exists():
@@ -391,13 +383,10 @@ def update_fallbacks(
     openrouter_active: bool,
     valid_model_names: set[str] | None = None,
     no_fallback_model_names: set[str] | None = None,
-    pinned_model_names: set[str] | None = None,
 ) -> list[str]:
     """
     - If OPENROUTER_API_KEY is set: append 'openrouter-free' to chat
-      fallback chains and to the catch-all '*' (idempotent). Pinned chains
-      (SCHEMA_PINNED_FALLBACKS) are exempt: their targets are only filtered
-      for existence, never extended, and an empty result stays `[]`.
+      fallback chains and to the catch-all '*' (idempotent).
     - If OPENROUTER_API_KEY is missing: remove 'openrouter-free' from all
       fallback chains, so LiteLLM doesn't try to make an OpenRouter call
       without a key.
@@ -442,12 +431,6 @@ def update_fallbacks(
 
         if valid_model_names is not None:
             items = [x for x in items if x in valid_model_names]
-
-        pinned = pinned_model_names if pinned_model_names is not None else SCHEMA_PINNED_FALLBACKS
-        if in_fallbacks and m.group(1) in pinned:
-            new_chain = ", ".join(f'"{x}"' for x in items)
-            new_lines[i] = re.sub(r"\[.*?\]", f"[{new_chain}]", line)
-            continue
 
         if in_fallbacks:
             if openrouter_active:

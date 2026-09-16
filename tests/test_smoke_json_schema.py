@@ -1,10 +1,10 @@
 """Property tests for tools/smoke-json-schema.py (pure parts, no network).
 
-The smoke tool is the gate that decides which deployments may serve
-`vacancy-parse`: a deployment that silently drops `response_format` (the
-proxy runs with `drop_params: true`) must fail here. So the validator and
-the request builder are checked against generated data, not a handful of
-hand-written examples.
+The smoke tool reports which deployments really honour a strict
+`response_format=json_schema` through the proxy: one that silently drops
+it (the proxy runs with `drop_params: true`) must fail here. So the
+validator and the request builder are checked against generated data, not
+a handful of hand-written examples.
 """
 import json
 import re
@@ -217,8 +217,11 @@ class TestVerifiedDeployments(unittest.TestCase):
 
 
 info_entry = st.fixed_dictionaries({
-    "model_name": st.sampled_from(["m1", "m2", "embedding-x", "vacancy-parse"]),
-    "litellm_params": st.fixed_dictionaries({"model": st.sampled_from(["gemini/a", "openai/b"])}),
+    "model_name": st.sampled_from(["m1", "m2", "embedding-x", "standard"]),
+    "litellm_params": st.fixed_dictionaries({
+        "model": st.sampled_from(["gemini/a", "openai/b"]),
+        "api_base": st.sampled_from(["", "https://a/v1", "https://b/v1"]),
+    }),
     "model_info": st.fixed_dictionaries({
         "id": st.text(alphabet="0123456789abcdef", min_size=4, max_size=6),
         "mode": st.sampled_from(["chat", "embedding", "audio_transcription"]),
@@ -226,8 +229,12 @@ info_entry = st.fixed_dictionaries({
 })
 
 
+# one /model/info entry per deployment id, as the proxy reports it
+info_list = st.lists(info_entry, max_size=12, unique_by=lambda e: e["model_info"]["id"])
+
+
 class TestModelInfoParsing(unittest.TestCase):
-    @given(st.lists(info_entry, max_size=12))
+    @given(info_list)
     def test_chat_names_are_chat_only_ordered_and_unique(self, info):
         names = smoke.chat_model_names(info)
         self.assertEqual(len(names), len(set(names)))
@@ -236,11 +243,30 @@ class TestModelInfoParsing(unittest.TestCase):
         # first occurrence order is kept
         self.assertEqual(names, [n for n in dict.fromkeys(chat)])
 
-    @given(st.lists(info_entry, max_size=12))
+    @given(info_list)
     def test_index_maps_every_id_to_its_deployment(self, info):
         index = smoke.deployment_index(info)
         for e in info:
-            self.assertIn(index[e["model_info"]["id"]], {"gemini/a", "openai/b"})
+            self.assertIn(e["litellm_params"]["model"], index[e["model_info"]["id"]])
+
+    @given(info_list)
+    def test_same_model_on_another_host_is_another_deployment(self, info):
+        # `openai/<model>` is served by several providers (LLM7, NVIDIA,
+        # OVHcloud, ...); the key must tell them apart by api_base.
+        index = smoke.deployment_index(info)
+        for a in info:
+            for b in info:
+                pa, pb = a["litellm_params"], b["litellm_params"]
+                ka, kb = index[a["model_info"]["id"]], index[b["model_info"]["id"]]
+                if pa["model"] == pb["model"] and pa["api_base"] == pb["api_base"]:
+                    self.assertEqual(ka, kb)
+                else:
+                    self.assertNotEqual(ka, kb)
+
+    @given(st.sampled_from(["gemini/a", "openai/b"]), st.sampled_from(["", "https://a/v1"]))
+    def test_deployment_key_round_trips(self, model, api_base):
+        key = smoke.deployment_key(model, api_base)
+        self.assertEqual(smoke.split_deployment_key(key), (model, api_base))
 
     def test_missing_fields_are_skipped(self):
         self.assertEqual(smoke.deployment_index([{"model_info": {}, "litellm_params": {}}]), {})
@@ -263,9 +289,18 @@ class TestVerifiedAllowlist(unittest.TestCase):
 
     def test_non_empty_with_iso_dates(self):
         self.assertTrue(smoke.JSON_SCHEMA_VERIFIED)
-        for model_id, day in smoke.JSON_SCHEMA_VERIFIED.items():
-            self.assertRegex(model_id, r"^[a-z0-9_-]+/.+", model_id)
+        for key, day in smoke.JSON_SCHEMA_VERIFIED.items():
+            model, _ = smoke.split_deployment_key(key)
+            self.assertRegex(model, r"^[a-z0-9_-]+/.+", key)
             date.fromisoformat(day)
+
+    def test_openai_compatible_entries_name_their_host(self):
+        # A bare `openai/<model>` names no provider: the same id exists on
+        # LLM7, NVIDIA and OVHcloud with very different behaviour.
+        for key in smoke.JSON_SCHEMA_VERIFIED:
+            model, api_base = smoke.split_deployment_key(key)
+            if model.startswith("openai/"):
+                self.assertTrue(api_base, f"{key}: api_base missing")
 
     def test_dates_are_not_in_the_future(self):
         for day in smoke.JSON_SCHEMA_VERIFIED.values():
