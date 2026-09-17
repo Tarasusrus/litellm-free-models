@@ -42,6 +42,7 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
+from fork import discovery as fork_discovery  # Fork: docs/adr/0001-fork-conventions.md
 from providers_config import PROVIDERS as PROVIDER_CONFIGS
 
 REPO_ROOT = Path(__file__).resolve().parent
@@ -125,6 +126,8 @@ def is_paid_vendor_model(model_id: str, provider: str = "") -> bool:
     exemptions). `provider` controls the additional ambiguous denylist
     (GLM-5/MiniMax), which only applies at the API aggregators, not at
     open-weight hosts like HuggingFace."""
+    if fork_discovery.is_first_party(model_id, provider):  # Fork: vendor's own tier is not a resale
+        return False
     if any(p.search(model_id) for p in PAID_VENDOR_PATTERNS):
         return True
     if provider in AGGREGATOR_PROVIDERS:
@@ -1679,7 +1682,8 @@ def find_stale_deployments(
     """
     partial = PARTIAL_CATALOGS if partial is None else partial
     rc = _load_render_config_module()
-    lines = template_path.read_text(encoding="utf-8").splitlines(keepends=True)
+    # Fork: fork/models.yaml deployments are checked too
+    lines = fork_discovery.template_with_fragment(template_path).splitlines(keepends=True)
     _, _, blocks = rc.parse_blocks(lines)
 
     catalogs = {
