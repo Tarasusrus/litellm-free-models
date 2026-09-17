@@ -6,7 +6,7 @@
         k8s-apply k8s-delete k8s-secret k8s-logs k8s-pods check-config \
         render-config render-config-no-redis test test-quiet clean \
         validate-manifests backup-db restore-db lint format lint-fix \
-        pre-commit-run install-dev pricing-doc
+        pre-commit-run install-dev pricing-doc sync-upstream
 
 # Pinned LiteLLM version (instead of the drifting main-latest tag).
 # Must match docker-compose.yaml, Dockerfile, and the K8s deployments;
@@ -37,6 +37,26 @@ render-config-no-redis: ## Render config.yaml WITHOUT Redis (standalone runs wit
 
 pricing-doc: ## Regenerate MODEL_PRICING.md (official, DB, and estimated savings)
 	@python3 find-shared-models.py --write-pricing-doc --refresh-pricing
+
+# ─── Upstream sync ──────────────────────────────────────────────────────────
+
+# Merge (not rebase): upstream's history is public, rewriting our side of it
+# would break anyone who already pulled this fork. Conflicts, if any, are
+# expected only in the files listed in docs/adr/0001-fork-conventions.md §2 —
+# see docs/upstream-sync.md for what to do when one happens.
+sync-upstream: ## Fetch + merge natorus87/litellm-free-models upstream/main
+	@git remote get-url upstream >/dev/null 2>&1 || \
+		{ echo "No 'upstream' remote configured. Run:"; \
+		  echo "  git remote add upstream https://github.com/natorus87/litellm-free-models.git"; \
+		  exit 1; }
+	@git fetch upstream
+	@if ! git merge upstream/main; then \
+		echo ""; \
+		echo "Merge conflict. See docs/upstream-sync.md for expected conflict points"; \
+		echo "and how to resolve them (docs/adr/0001-fork-conventions.md §2)."; \
+		exit 1; \
+	fi
+	@echo "Merged upstream/main. Now run: make test && make render-config-dry"
 
 k8s-configmap: render-config ## Regenerate k8s/configmap.yaml from rendered config.yaml
 	@python3 -c "\
