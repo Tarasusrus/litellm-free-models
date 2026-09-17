@@ -43,7 +43,8 @@ marked `# Fork:`; on a sync, keep ours.
 | File | Edit | Why |
 |---|---|---|
 | `docker-compose.yaml` | proxy service: official image, repo mounted read-only at `/repo`, `entrypoint: fork/docker-entrypoint.sh`; container names and host port overridable from `.env` | one-command start; compose has no other hook for "render before start" that survives a missing `config.yaml` (a bind mount of a missing file creates a directory) |
-| `Makefile` | `render-config*` targets call `fork/render.py`; `docker-compose-up` no longer pre-renders | keep upstream's targets working with the fork's route |
+| `Makefile` | `render-config*` and `check-config` targets call `fork/render.py`; `docker-compose-up` no longer pre-renders | keep upstream's targets working with the fork's route |
+| `onboard.py` | the render step calls `fork/render.py` | onboarding must produce the same config as compose and the Makefile |
 | `find-shared-models.py` | `--write-docs` targets `docs/upstream-README.md` instead of `README.md` | the root README is the fork's; the generated matrix belongs to the upstream text |
 | `.github/workflows/ci.yml` | installs `requirements-dev.txt` (hypothesis), renders through `fork/render.py`, drift check on `docs/upstream-README.md` | CI must exercise the fork's renderer |
 | `pyproject.toml` | per-file ruff ignore for `find-shared-models.py` (`UP038`) | upstream code trips a rule newer ruff enables; ignoring it is a one-line, conflict-free fix |
