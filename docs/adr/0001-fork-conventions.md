@@ -25,7 +25,8 @@ it.
 | `fork/render.py` | Drop-in for `render-config.py` (same flags). Prepends `fork/models.yaml` to a temporary copy of the template, runs upstream's renderer **unchanged** on it, then post-processes the output: appends the `standard` deployments, pins `{"standard": []}` in `fallbacks`, sets `router_settings.max_fallbacks`. |
 | `fork/models.yaml` | Deployments upstream's catalogue does not carry (today: Gemini flash-lite tier), in upstream's block format so the same filter and validation apply. Placed first in `model_list`, so they lead their provider in the `standard` chain. Tests reject entries that duplicate an upstream backend or reuse a non-chat alias. |
 | `fork/standard.py` | Provider priority (`PROVIDER_PRIORITY`), the chain builder (`chain`) and the YAML emitter (`render_blocks`). |
-| `fork/docker-entrypoint.sh` | Proxy entrypoint for compose: render inside the container, then start LiteLLM. |
+| `fork/docker-entrypoint.sh` | Proxy entrypoint for compose: export the provider keys from `.env` (`fork/env_exports.py`), render inside the container, then start LiteLLM. Keys are read from the file at every start, so a changed key needs `docker compose restart litellm-proxy`, not a recreate. |
+| `fork/env_exports.py` | Prints `export VAR=…` for the provider variables in `.env`. Only variables `providers_config.py` knows; passwords and the master key keep coming from compose. |
 | `tests/test_standard_route.py` | Property tests for the chain and the rendered config. |
 | `docs/USAGE.md`, `docs/run.md`, `docs/adr/` | Fork documentation. |
 | `docs/upstream-README.md`, `docs/upstream/` | Upstream's README, review log and research, moved out of the root verbatim. |
