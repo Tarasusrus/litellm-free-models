@@ -27,7 +27,9 @@ it.
 | `fork/standard.py` | Provider priority (`PROVIDER_PRIORITY`), the chain builder (`chain`) and the YAML emitter (`render_blocks`). |
 | `fork/docker-entrypoint.sh` | Proxy entrypoint for compose: export the provider keys from `.env` (`fork/env_exports.py`), render inside the container, then start LiteLLM. Keys are read from the file at every start, so a changed key needs `docker compose restart litellm-proxy`, not a recreate. |
 | `fork/env_exports.py` | Prints `export VAR=…` for the provider variables in `.env`. Only variables `providers_config.py` knows; passwords and the master key keep coming from compose. |
+| `fork/settings_ui.py`, `fork/settings_ui.html` | The `settings-ui` compose service: provider keys in the browser. Lists `providers_config.PROVIDERS` in chain order, checks a key with `find-shared-models.py`'s `fetch_*`, writes `.env` atomically (temp + rename, 0600, only provider variables), restarts the proxy through the Docker Engine API and reads the chain from the container log. Console links and hints come from `onboard.PROVIDER_KEYS`; nothing is typed twice. |
 | `tests/test_standard_route.py` | Property tests for the chain and the rendered config. |
+| `tests/test_settings_ui.py`, `tests/test_env_exports.py`, `tests/test_fork_renderer_entrypoints.py` | Property tests for the settings page (`.env` atomicity and ownership, masking, provider list, mocked key check, HTTP API), the key export and the render entry points. |
 | `docs/USAGE.md`, `docs/run.md`, `docs/adr/` | Fork documentation. |
 | `docs/upstream-README.md`, `docs/upstream/` | Upstream's README, review log and research, moved out of the root verbatim. |
 
@@ -43,7 +45,7 @@ marked `# Fork:`; on a sync, keep ours.
 
 | File | Edit | Why |
 |---|---|---|
-| `docker-compose.yaml` | proxy service: official image, repo mounted read-only at `/repo`, `entrypoint: fork/docker-entrypoint.sh`; container names and host port overridable from `.env` | one-command start; compose has no other hook for "render before start" that survives a missing `config.yaml` (a bind mount of a missing file creates a directory) |
+| `docker-compose.yaml` | proxy service: official image, repo mounted read-only at `/repo`, `entrypoint: fork/docker-entrypoint.sh`; container names and host port overridable from `.env`; the `settings-ui` service (loopback only, repo read-write for the `.env` replace, Docker socket read-only) | one-command start; compose has no other hook for "render before start" that survives a missing `config.yaml` (a bind mount of a missing file creates a directory) |
 | `Makefile` | `render-config*` and `check-config` targets call `fork/render.py`; `docker-compose-up` no longer pre-renders | keep upstream's targets working with the fork's route |
 | `onboard.py` | the render step calls `fork/render.py` | onboarding must produce the same config as compose and the Makefile |
 | `find-shared-models.py` | `--write-docs` targets `docs/upstream-README.md` instead of `README.md` | the root README is the fork's; the generated matrix belongs to the upstream text |
