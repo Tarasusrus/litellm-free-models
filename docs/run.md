@@ -10,11 +10,13 @@ Everything below is run from the repo root.
 | `litellm-free-models` | the proxy | `4444` → 4000 |
 | `litellm-redis` | response cache + router state | none |
 | `litellm-postgres` | keys / spend log | none |
+| `litellm-settings-ui` | settings page (provider keys) | `127.0.0.1:4445` → 4445 |
 
-Only the proxy port is published. Change it with `LITELLM_PORT=…` in `.env`;
-container names with `LITELLM_CONTAINER_NAME`, `REDIS_CONTAINER_NAME`,
-`POSTGRES_CONTAINER_NAME` (useful for a second stack on the same host,
-together with `COMPOSE_PROJECT_NAME`).
+Only the proxy port and the settings page are published; the page is bound
+to loopback. Change them with `LITELLM_PORT=…` / `SETTINGS_UI_PORT=…` in
+`.env`; container names with `LITELLM_CONTAINER_NAME`, `REDIS_CONTAINER_NAME`,
+`POSTGRES_CONTAINER_NAME`, `SETTINGS_UI_CONTAINER_NAME` (useful for a second
+stack on the same host, together with `COMPOSE_PROJECT_NAME`).
 
 ## Keys
 
@@ -54,8 +56,15 @@ docker compose logs litellm-proxy | grep -A200 "'standard' route" | grep -E "^\s
 ## Restart / apply a config or key change
 
 ```bash
-docker compose restart litellm-proxy      # re-renders from .env, ~20 s
+docker compose restart litellm-proxy      # re-reads keys from .env, re-renders, ~20 s
 ```
+
+Or open the settings page (`http://localhost:4445`, master key), change the
+keys and press **Apply** — same write + restart, and the page shows the
+resulting `standard` chain. Provider keys reach LiteLLM from the file at
+every start (`fork/docker-entrypoint.sh` exports them), so a restart is
+enough; a recreate (`up -d`) is only needed for compose-level changes such
+as ports or passwords.
 
 Changing `POSTGRES_PASSWORD` after the first start also needs
 `docker compose down -v` (drops the DB volume) or a manual `ALTER ROLE`.

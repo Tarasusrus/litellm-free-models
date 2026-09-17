@@ -300,8 +300,9 @@ def step_key_check(lines: list[str]) -> None:
 def step_render() -> bool:
     heading("Step 5/6 — Render config.yaml")
     sys.stdout.flush()  # keep ordering when stdout is piped
+    # Fork: fork/render.py = upstream render-config.py + the `standard` route.
     result = subprocess.run(
-        [sys.executable, str(REPO_ROOT / "render-config.py")],
+        [sys.executable, str(REPO_ROOT / "fork" / "render.py")],
         cwd=REPO_ROOT,
     )
     if result.returncode != 0:

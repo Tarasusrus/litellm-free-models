@@ -169,9 +169,10 @@ k8s-restart: ## Rollout restart
 # file (config.check.yaml), so validation needs neither a running Redis nor
 # touches the real config.yaml. Port 4010, to avoid colliding with a
 # locally running proxy.
+# Fork: rendered with fork/render.py, so the `standard` route is validated too.
 check-config: ## Validate config by booting LiteLLM against a Redis-less render
 	@echo "Rendering validation config (without Redis) ..."
-	@python3 render-config.py --no-redis --output config.check.yaml
+	@python3 fork/render.py --no-redis --output config.check.yaml
 	@docker rm -f litellm-config-check >/dev/null 2>&1 || true
 	@echo "Booting LiteLLM ($(LITELLM_IMAGE)) ..."
 	@docker run -d --name litellm-config-check \

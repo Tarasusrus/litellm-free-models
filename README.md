@@ -24,6 +24,8 @@ What the fork adds:
   `.env` joins the chain on the next start; nothing to edit by hand.
 - **One-command start** — `docker compose up -d` renders the config inside
   the proxy container. No `make render-config` on the host.
+- **Settings UI** — a local page for provider keys: status, live check,
+  Apply writes `.env` and restarts the proxy. See [Settings UI](#settings-ui).
 - **Client guide** — [docs/USAGE.md](docs/USAGE.md): everything a client
   (or an agent writing one) needs to send requests, including structured
   output and its limits.
@@ -41,8 +43,9 @@ docker compose up -d
 
 Check: `curl -sf localhost:4444/health/readiness` → `{"status":"healthy",…}`.
 
-Only the proxy port (`4444`, change with `LITELLM_PORT` in `.env`) is
-published; Postgres and Redis stay inside the compose network. Providers
+Only the proxy port (`4444`, change with `LITELLM_PORT` in `.env`) and the
+settings page (`127.0.0.1:4445`) are published; Postgres and Redis stay
+inside the compose network. Providers
 whose key is empty are simply left out. See [docs/run.md](docs/run.md) for
 restart, update and stop.
 
@@ -74,14 +77,42 @@ audio, …) is still available by name — see the model matrix in the
 [upstream README](docs/upstream-README.md#-models). Request/response format,
 structured output, limits and error codes: [docs/USAGE.md](docs/USAGE.md).
 
-## Add a provider key
+## Settings UI
+
+`docker compose up -d` also starts `settings-ui`, a page on
+`http://localhost:4445` (change with `SETTINGS_UI_PORT` in `.env`; it
+listens on loopback only). Log in with `LITELLM_MASTER_KEY`.
+
+What it shows — one row per provider from `providers_config.py`, in
+`standard` priority order:
+
+- the stored key, masked, and its state (empty / set / example value from
+  `.env.example` / default tier);
+- **Check** — a live catalogue query with the stored key (same requests as
+  `find-shared-models.py`), reporting the model count or the error. Results
+  are cached until the key changes or the service restarts;
+- **where to get** — the provider's console.
+
+**Apply** writes the changed keys to `.env` (atomic replace, mode 0600,
+every other line untouched), restarts the proxy through the Docker socket,
+waits for readiness and prints the `standard` chain the proxy rendered.
+Keys are only ever masked in API responses and never logged. The page
+edits provider variables only; the master key and the passwords stay
+hands-on in `.env`.
+
+The service mounts the repo read-write (for the `.env` replace) and the
+Docker socket read-only; that socket still allows restarting any container
+on the host, which is why the page is bound to loopback and gated by the
+master key.
+
+## Add a provider key by hand
 
 1. Get a free key from the provider (links and limits: [upstream README →
    Providers](docs/upstream-README.md#-providers)).
 2. Put it into `.env` (variable names are in `.env.example`).
-3. `docker compose restart litellm-proxy` — the config is re-rendered on
-   start and the provider's chat models join the `standard` chain at their
-   priority slot.
+3. `docker compose restart litellm-proxy` — the proxy reads the keys from
+   `.env` at every start, re-renders the config and the provider's chat
+   models join the `standard` chain at their priority slot.
 
 The current chain is printed in the proxy's startup log
 (`docker compose logs litellm-proxy | grep -A200 "'standard' route"`), or
