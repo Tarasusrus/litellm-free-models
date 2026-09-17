@@ -7,14 +7,22 @@
   # Being first, these lead their provider in the `standard` chain.
   # Rules: docs/adr/0001-fork-conventions.md, tests/test_standard_route.py.
 
-  # Google AI Studio flash-lite tier: fast, generous quota, honours strict
-  # json_schema (tools/smoke-json-schema.py 5/5 with --no-fallback).
+  # Google AI Studio, free tier. Limits are per project and per model, read
+  # from the AI Studio dashboard (https://aistudio.google.com/rate-limit)
+  # on 2026-09-17; the public docs page no longer carries the table.
+  #   flash-lite (3.5, 3.1):           15 RPM / 250K TPM / 500 RPD
+  #   flash (2.5, 3, 3.5, 3.6, 3.7, 3.8): 5 RPM / 250K TPM /  20 RPD
+  # `rpd` has no litellm_params field, so it stays a comment. The flash tier
+  # is not deployed: 20 requests a day is spent before the chain warms up,
+  # and none of 3.5/3.6/3.8 answered 5/5 in tools/smoke-json-schema.py
+  # (503 "high demand" on 2026-09-17). flash-lite honours strict json_schema
+  # (5/5 with --no-fallback).
   - model_name: gemini-3.5-flash-lite
     litellm_params:
       model: gemini/gemini-3.5-flash-lite
       api_key: os.environ/GEMINI_API_KEY
       tpm: 250000
-      rpm: 10
+      rpm: 10   # 15 shared with gemini-flash-lite-latest below
       timeout: 30
       num_retries: 1
     model_info:
@@ -28,7 +36,7 @@
       model: gemini/gemini-3.1-flash-lite
       api_key: os.environ/GEMINI_API_KEY
       tpm: 250000
-      rpm: 10
+      rpm: 15
       timeout: 30
       num_retries: 1
     model_info:
@@ -36,16 +44,17 @@
       output_cost_per_token: 0
       mode: chat
 
+  # Alias: resolves to gemini-3.5-flash-lite (modelVersion in the response,
+  # 2026-09-17) and draws on the same 15 RPM budget -- hence the split.
   - model_name: gemini-flash-lite-latest
     litellm_params:
       model: gemini/gemini-flash-lite-latest
       api_key: os.environ/GEMINI_API_KEY
       tpm: 250000
-      rpm: 10
+      rpm: 5
       timeout: 30
       num_retries: 1
     model_info:
       input_cost_per_token: 0
       output_cost_per_token: 0
       mode: chat
-
