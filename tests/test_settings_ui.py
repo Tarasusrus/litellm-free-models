@@ -17,11 +17,12 @@ import urllib.request
 from pathlib import Path
 from unittest import mock
 
-from hypothesis import given, settings
+from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 
 from fork import settings_ui, standard
 from providers_config import PROVIDERS
+import onboard
 
 PROVIDER_VARS = sorted(settings_ui.EDITABLE_VARS)
 
@@ -166,6 +167,7 @@ class TestKeyCheck(unittest.TestCase):
     @settings(max_examples=40, deadline=None)
     @given(key=secrets_, n=st.integers(0, 40))
     def test_ok_reports_model_count(self, key, n):
+        assume(not onboard.is_placeholder(key))
         data = {"data": [{"id": f"m{i}"} for i in range(n)]}
         checker = settings_ui.KeyChecker()
         with mock.patch.object(settings_ui.fsm, "http_get_json", return_value=data):
@@ -176,6 +178,7 @@ class TestKeyCheck(unittest.TestCase):
     @settings(max_examples=40, deadline=None)
     @given(key=secrets_, noise=st.text(max_size=20))
     def test_failure_message_never_contains_the_key(self, key, noise):
+        assume(not onboard.is_placeholder(key))
         checker = settings_ui.KeyChecker()
         err = urllib.error.HTTPError("https://x/?key=" + key, 401, noise + key, {}, None)
         with mock.patch.object(settings_ui.fsm, "http_get_json", side_effect=err):
@@ -186,6 +189,8 @@ class TestKeyCheck(unittest.TestCase):
     @settings(max_examples=30, deadline=None)
     @given(key=secrets_)
     def test_result_is_cached_per_key_value(self, key):
+        assume(not onboard.is_placeholder(key))
+        assume(not onboard.is_placeholder(key + "x"))
         checker = settings_ui.KeyChecker()
         data = {"data": [{"id": "a"}]}
         with mock.patch.object(settings_ui.fsm, "http_get_json", return_value=data) as get:
@@ -200,6 +205,13 @@ class TestKeyCheck(unittest.TestCase):
         with mock.patch.object(settings_ui.fsm, "http_get_json") as get:
             res = checker.check("groq", {})
         self.assertEqual(res["status"], "missing")
+        get.assert_not_called()
+
+    def test_placeholder_value_is_not_a_network_call(self):
+        checker = settings_ui.KeyChecker()
+        with mock.patch.object(settings_ui.fsm, "http_get_json") as get:
+            res = checker.check("groq", {"GROQ_API_KEY": "gsk_your-groq-api-key-here"})
+        self.assertEqual(res["status"], "placeholder")
         get.assert_not_called()
 
     def test_provider_without_catalogue_query(self):

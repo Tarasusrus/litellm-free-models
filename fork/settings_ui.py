@@ -218,8 +218,11 @@ class KeyChecker:
         if fetch is None:
             return {"status": "unsupported", "models": 0, "error": "no catalogue query for this provider"}
         needed = self._needed(name)
-        if any(not env.get(v) or onboard.is_placeholder(env[v]) for v in needed):
+        states = [onboard.key_state(env.get(v, ""), v) for v in needed]
+        if any(s == "empty" for s in states):
             return {"status": "missing", "models": 0, "error": "no key stored"}
+        if any(s == "placeholder" for s in states):
+            return {"status": "placeholder", "models": 0, "error": "placeholder value, not a real key"}
         key = self._key(name, env)
         with self._lock:
             hit = self._cache.get(key)
