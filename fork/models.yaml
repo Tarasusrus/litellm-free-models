@@ -14,7 +14,7 @@
   #   flash (2.5, 3, 3.5, 3.6, 3.7, 3.8): 5 RPM / 250K TPM /  20 RPD
   # `rpd` has no litellm_params field, so it stays a comment. The flash tier
   # is not deployed: 20 requests a day is spent before the chain warms up,
-  # and none of 3.5/3.6/3.8 answered 5/5 in tools/smoke-json-schema.py
+  # and none of 3.5/3.6/3.7/3.8 answered 5/5 in tools/smoke-json-schema.py
   # (503 "high demand" on 2026-09-17). flash-lite honours strict json_schema
   # (5/5 with --no-fallback).
   - model_name: gemini-3.5-flash-lite
