@@ -114,6 +114,31 @@ services:
       redis:
         condition: service_healthy
 
+  # Fork: settings page (fork/settings_ui.py). Provider keys in the browser:
+  # writes .env, restarts the proxy through the Docker socket, shows the
+  # `standard` chain. Loopback only; login with LITELLM_MASTER_KEY.
+  # The repo is mounted read-write because .env is replaced atomically
+  # (temp file + rename in the same directory); nothing else is written.
+  settings-ui:
+    image: python:3.12-alpine
+    container_name: ${SETTINGS_UI_CONTAINER_NAME:-litellm-settings-ui}
+    ports:
+      - "127.0.0.1:${SETTINGS_UI_PORT:-4445}:4445"
+    environment:
+      - SETTINGS_ENV_FILE=/repo/.env
+      - SETTINGS_BIND_HOST=0.0.0.0
+      - SETTINGS_PORT=4445
+      - PROXY_URL=http://litellm-proxy:4000
+      - PROXY_CONTAINER=${LITELLM_CONTAINER_NAME:-litellm-free-models}
+      - PYTHONDONTWRITEBYTECODE=1
+    volumes:
+      - ./:/repo
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command: ["python3", "/repo/fork/settings_ui.py"]
+    restart: unless-stopped
+    networks:
+      - litellm-network
+
 networks:
   litellm-network:
     driver: bridge
