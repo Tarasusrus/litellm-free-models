@@ -53,7 +53,7 @@ PROVIDER_KEYS: list[tuple[str, str, str, str]] = [
      "https://developers.cloudflare.com/fundamentals/setup/find-account-and-zone-ids/",
      "Format: https://api.cloudflare.com/client/v4/accounts/<ACCOUNT_ID>/ai/v1"),
     ("GEMINI_API_KEY", "Google AI Studio", "https://aistudio.google.com/apikey",
-     "Currently no active deployment (gemma-3 retired); only for future syncs."),
+     "First stop of the `standard` route (fork/models.yaml)."),  # Fork
     ("NVIDIA_API_KEY", "NVIDIA NIM", "https://build.nvidia.com/",
      "Phone verification required; 40 RPM in return."),
     ("MISTRAL_API_KEY", "Mistral La Plateforme", "https://console.mistral.ai/", ""),
@@ -78,7 +78,7 @@ PROVIDER_KEYS: list[tuple[str, str, str, str]] = [
 ]
 
 # Variables where "empty" is a valid, intentional state
-EMPTY_IS_OK = {"OVHCLOUD_API_KEY", "GEMINI_API_KEY"}
+EMPTY_IS_OK = {"OVHCLOUD_API_KEY"}  # Fork: Gemini leads the `standard` route
 # Variables with a valid non-key default
 SPECIAL_DEFAULTS = {"LLM7IO_API_KEY": "unused"}
 

@@ -49,7 +49,7 @@ marked `# Fork:`; on a sync, keep ours.
 |---|---|---|
 | `docker-compose.yaml` | proxy service: official image, repo mounted read-only at `/repo`, `entrypoint: fork/docker-entrypoint.sh`; container names and host port overridable from `.env`; the `settings-ui` service (loopback only, repo read-write for the `.env` replace, Docker socket read-only) | one-command start; compose has no other hook for "render before start" that survives a missing `config.yaml` (a bind mount of a missing file creates a directory) |
 | `Makefile` | `render-config*` and `check-config` targets call `fork/render.py`; `docker-compose-up` no longer pre-renders | keep upstream's targets working with the fork's route |
-| `onboard.py` | the render step calls `fork/render.py` | onboarding must produce the same config as compose and the Makefile |
+| `onboard.py` | the render step calls `fork/render.py`; `GEMINI_API_KEY` is no longer "empty is fine" and its hint names the route | onboarding must produce the same config as compose and the Makefile; Gemini leads `standard` |
 | `find-shared-models.py` | `--write-docs` targets `docs/upstream-README.md` instead of `README.md`; `is_paid_vendor_model` asks `fork/discovery.py` first (a vendor's own line is never a resale: `gemini-*` at `google-ai` is free, at `llm7io`/`opencode-zen` it stays denied); the stale check reads the template with `fork/models.yaml` merged in | the root README is the fork's; without the two hooks the sync reports Google AI Studio's whole catalogue as "paid filtered" and never checks the fork's own deployments |
 | `.github/workflows/ci.yml` | installs `requirements-dev.txt` (hypothesis), renders through `fork/render.py`, drift check on `docs/upstream-README.md` | CI must exercise the fork's renderer |
 | `pyproject.toml` | per-file ruff ignore for `find-shared-models.py` (`UP038`) | upstream code trips a rule newer ruff enables; ignoring it is a one-line, conflict-free fix |
@@ -90,6 +90,14 @@ marked `# Fork:`; on a sync, keep ours.
   `tests/test_standard_route.py` fails when a provider exists in
   `providers_config.PROVIDERS` without a slot here, so an upstream sync that
   adds a provider has to assign one deliberately.
+- Gemini budgets come from the AI Studio dashboard, per model and per
+  project (`fork/models.yaml` carries the date and the table;
+  `tests/test_fork_models.py` pins them, aliases share the budget of the
+  model they resolve to). `providers_config.py` keeps upstream's
+  `rpm=2`/`tpm=200000` for `google-ai`: that value is only the default
+  `--apply` writes for a newly discovered shared model, and it sits below
+  every observed per-model limit, so nothing overrides it. The flash tier
+  (5 RPM, 20 RPD) is deliberately not deployed.
 - Structured output is passed through; providers that cannot do it stay
   in the chain. The client validates and retries (`docs/USAGE.md`). The
   live report of compliant deployments (`JSON_SCHEMA_VERIFIED` in
