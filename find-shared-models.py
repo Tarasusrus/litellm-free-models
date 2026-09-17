@@ -2158,8 +2158,9 @@ def main() -> int:
             return 2
         matrix = build_matrix(src)
         if args.write_docs:
+            # Fork: upstream's README lives in docs/ (docs/adr/0001-fork-conventions.md)
             write_matrix_into_docs(
-                matrix, [REPO_ROOT / "AGENTS.md", REPO_ROOT / "README.md"]
+                matrix, [REPO_ROOT / "AGENTS.md", REPO_ROOT / "docs" / "upstream-README.md"]
             )
         else:
             print(matrix)

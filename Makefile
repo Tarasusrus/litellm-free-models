@@ -24,14 +24,16 @@ onboard: ## Interactive setup: .env, API keys, key check, render, compose start
 
 # ─── Config render pipeline ─────────────────────────────────────────────────
 
+# Fork: fork/render.py = upstream render-config.py + the generated
+# `standard` route (docs/adr/0001-fork-conventions.md).
 render-config: ## Render config.template.yaml -> config.yaml
-	@python3 render-config.py
+	@python3 fork/render.py
 
 render-config-dry: ## Dry-run render (no writes)
-	@python3 render-config.py --dry-run
+	@python3 fork/render.py --dry-run
 
 render-config-no-redis: ## Render config.yaml WITHOUT Redis (standalone runs without a Redis container)
-	@python3 render-config.py --no-redis
+	@python3 fork/render.py --no-redis
 
 pricing-doc: ## Regenerate MODEL_PRICING.md (official, DB, and estimated savings)
 	@python3 find-shared-models.py --write-pricing-doc --refresh-pricing
@@ -61,7 +63,7 @@ docker-run: render-config-no-redis docker-build ## Run standalone with Docker (w
 		-e REDIS_HOST= \
 		litellm-free-models
 
-docker-compose-up: render-config ## Start with docker-compose
+docker-compose-up: env-check ## Start with docker-compose (config is rendered inside the container)
 	docker compose --env-file .env up -d
 
 docker-compose-down: ## Stop docker-compose

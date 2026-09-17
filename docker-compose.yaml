@@ -1,13 +1,13 @@
-# Hinweis: Vor `docker compose up` muss die config.yaml aus dem Template
-# gerendert werden. Das passiert automatisch via Makefile-Target
-# `docker-compose-up` (das `render-config` aufruft), oder manuell:
-#   python3 render-config.py
-#   docker compose --env-file .env up -d
+# Fork: config.yaml is rendered INSIDE the proxy container on every start
+# (fork/docker-entrypoint.sh: template + .env + fork additions), so
+# `cp .env.example .env` + `docker compose up -d` is the whole setup.
+# Nothing has to be rendered on the host first; `make render-config` is
+# still there for K8s and the standalone `make docker-run`.
 
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: litellm-postgres
+    container_name: ${POSTGRES_CONTAINER_NAME:-litellm-postgres}
     environment:
       - POSTGRES_USER=${POSTGRES_USER:-litellm}
       # No default on purpose: a silently ignored password is worse than a
@@ -28,7 +28,7 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: litellm-redis
+    container_name: ${REDIS_CONTAINER_NAME:-litellm-redis}
     # --requirepass erzwingt Passwort-Auth. Kein Default: REDIS_PASSWORD muss
     # in .env gesetzt sein (siehe .env.example), sonst schlaegt der Start
     # laut fehl statt still mit einem bekannten Default-Passwort zu laufen.
@@ -59,14 +59,13 @@ services:
     restart: unless-stopped
 
   litellm-proxy:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    # OR use the official image without a custom Dockerfile:
-    # image: ghcr.io/berriai/litellm:v1.97.0
-    container_name: litellm-free-models
+    # Fork: the official image plus the repo mounted read-only; the
+    # entrypoint renders the config at start. The custom Dockerfile
+    # (config baked into the image) stays available for `make docker-run`.
+    image: ghcr.io/berriai/litellm:v1.97.0
+    container_name: ${LITELLM_CONTAINER_NAME:-litellm-free-models}
     ports:
-      - "4444:4000"  # LiteLLM proxy port
+      - "${LITELLM_PORT:-4444}:4000"  # LiteLLM proxy port
     environment:
       # Pass all API keys from .env file
       - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
@@ -93,9 +92,11 @@ services:
       - REDIS_PORT=${REDIS_PORT:-6379}
       - REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}
     volumes:
-      # Mount the config file so you can edit without rebuilding
-      - ./config.yaml:/app/config.yaml:ro
-    command: ["--config", "/app/config.yaml", "--port", "4000"]
+      # Fork: the whole repo (template, renderer, fork/, .env) read-only;
+      # the rendered config never touches the host.
+      - ./:/repo:ro
+    entrypoint: ["/repo/fork/docker-entrypoint.sh"]
+    command: ["--port", "4000"]
     restart: unless-stopped
     healthcheck:
       # The litellm image has neither curl nor wget on PATH; python3 (part

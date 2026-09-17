@@ -1,7 +1,7 @@
-# Running the proxy by hand (fork notes)
+# Running the proxy (fork notes)
 
-How this fork is started, restarted and updated on a single machine with
-Docker Desktop (compose v2). Everything below is run from the repo root.
+Start, restart, update and stop on a single machine with Docker Compose v2.
+Everything below is run from the repo root.
 
 ## What is running
 
@@ -11,64 +11,75 @@ Docker Desktop (compose v2). Everything below is run from the repo root.
 | `litellm-redis` | response cache + router state | none |
 | `litellm-postgres` | keys / spend log | none |
 
-Only `4444` is published. Redis and Postgres are reachable inside the
-compose network only. Other Postgres containers on the host (e.g. `55432`)
-do not conflict.
+Only the proxy port is published. Change it with `LITELLM_PORT=…` in `.env`;
+container names with `LITELLM_CONTAINER_NAME`, `REDIS_CONTAINER_NAME`,
+`POSTGRES_CONTAINER_NAME` (useful for a second stack on the same host,
+together with `COMPOSE_PROJECT_NAME`).
 
 ## Keys
 
-`.env` is never committed. It is a copy of `~/.config/litellm-free-models/.env`
-plus the compose-only variables:
+`.env` is never committed. Start from the example:
 
 ```bash
-cp ~/.config/litellm-free-models/.env .env
+cp .env.example .env
 chmod 600 .env
-cat >> .env <<EOF
-REDIS_HOST=redis
-REDIS_PORT=6379
-REDIS_PASSWORD=$(openssl rand -hex 16)
-LLM7IO_API_KEY=unused      # LLM7 anonymous tier (10 RPM shared)
-EOF
 ```
 
-Filled today: `LITELLM_MASTER_KEY`, `POSTGRES_PASSWORD`, `GEMINI_API_KEY`.
-Every other provider is empty; `render-config.py` drops their deployments.
+Required: `LITELLM_MASTER_KEY`, `POSTGRES_PASSWORD`, `REDIS_PASSWORD`
+(`openssl rand -hex 16` for the passwords). Every provider key is optional;
+a provider whose key is empty is left out of the config and of the
+`standard` chain. `LLM7IO_API_KEY=unused` keeps LLM7's anonymous tier in
+(any non-empty value works).
 
 ## Start
 
 ```bash
-make render-config          # config.template.yaml + .env -> config.yaml
-make docker-compose-up      # renders again, then docker compose up -d
+docker compose up -d
 curl -sf localhost:4444/health/readiness
 # {"status":"healthy","db":"connected"}
 ```
 
-Expected render output with the current keys: `Kept deployments: 26`,
-`Available model_names: 23`. If a port is taken, change the host side of
-`4444:4000` in `docker-compose.yaml`.
-
-## Restart / apply a config change
-
-`config.yaml` is bind-mounted read-only; the proxy reads it once at start.
+The config is rendered **inside** the proxy container on every start
+(`fork/docker-entrypoint.sh` → `fork/render.py`): template + `.env` + the
+generated `standard` route. Nothing is written to the host. The startup log
+shows what was rendered:
 
 ```bash
-make render-config
-docker compose --env-file .env restart litellm-proxy
+docker compose logs litellm-proxy | grep -E "Kept deployments|Available model_names|'standard' route" -A0
+docker compose logs litellm-proxy | grep -A200 "'standard' route" | grep -E "^\s+[0-9]+\."
 ```
 
-Key or password change → edit `.env`, then the same two commands. Changing
-`POSTGRES_PASSWORD` after the first start also needs `docker compose down -v`
-(drops the DB volume) or a manual `ALTER ROLE`.
+`make docker-compose-up` is a thin wrapper around the same command.
+
+## Restart / apply a config or key change
+
+```bash
+docker compose restart litellm-proxy      # re-renders from .env, ~20 s
+```
+
+Changing `POSTGRES_PASSWORD` after the first start also needs
+`docker compose down -v` (drops the DB volume) or a manual `ALTER ROLE`.
+
+## Render on the host (optional)
+
+Only needed for Kubernetes (`make k8s-configmap`), the standalone
+`make docker-run`, or to inspect the config:
+
+```bash
+make render-config                                     # -> config.yaml (git-ignored, contains keys)
+python3 fork/render.py --output /tmp/config.yaml       # anywhere else
+```
 
 ## Update the fork
 
 ```bash
 git pull
 make test && make lint
-make render-config
-docker compose --env-file .env up -d      # recreates only what changed
+docker compose up -d      # recreates only what changed; the proxy re-renders on start
 curl -sf localhost:4444/health/readiness
 ```
+
+Syncing with upstream: `docs/adr/0001-fork-conventions.md` §4.
 
 ## Stop
 
@@ -77,74 +88,27 @@ docker compose down          # keeps the Postgres volume
 docker compose down -v       # also wipes keys/spend data
 ```
 
-## `vacancy-parse`: strict JSON for job ads
-
-`vacancy-parse` is a fork-only route (last section of `config.template.yaml`).
-It exists because the proxy runs with `drop_params: true`: a provider that
-does not understand `response_format` silently gets a plain chat request and
-answers with prose. So the route is built only from deployments that passed
-`tools/smoke-json-schema.py` live (`JSON_SCHEMA_VERIFIED` in that file), and
-its fallback chain never reaches the catch-all `*`:
-
-```
-vacancy-parse           gemini/gemini-3.5-flash-lite, gemini/gemini-3.1-flash-lite
-  └─ vacancy-parse-fallback   LLM7 codestral-latest, LLM7 mistral-Nemo-Instruct-2407
-       └─ []                  (explicit end of chain)
-```
-
-`tests/test_vacancy_parse.py` fails if anything unverified becomes reachable,
-if the chain is empty, or if the renderer ever appends `openrouter-free` to it.
-
-### Example request
+## Smoke test
 
 ```bash
-KEY=$(grep ^LITELLM_MASTER_KEY= .env | cut -d= -f2-)
-curl -s localhost:4444/v1/chat/completions \
-  -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
-  -D - -o /tmp/vp.json \
-  -d '{
-    "model": "vacancy-parse",
-    "messages": [
-      {"role": "system", "content": "Извлеки данные вакансии. Только JSON по схеме."},
-      {"role": "user", "content": "Ищем Go-разработчика (middle) в финтех, Москва, гибрид. 250–320 тыс. руб. Go, PostgreSQL, Kafka. Компания «Финтех Лаб»."}
-    ],
-    "response_format": {"type": "json_schema", "json_schema": {"name": "vacancy", "strict": true,
-      "schema": {"type": "object", "additionalProperties": false,
-        "required": ["title", "company", "location", "remote", "salary_min", "salary_max", "currency", "seniority", "skills"],
-        "properties": {
-          "title": {"type": "string"},
-          "company": {"anyOf": [{"type": "string"}, {"type": "null"}]},
-          "location": {"anyOf": [{"type": "string"}, {"type": "null"}]},
-          "remote": {"type": "boolean"},
-          "salary_min": {"anyOf": [{"type": "integer"}, {"type": "null"}]},
-          "salary_max": {"anyOf": [{"type": "integer"}, {"type": "null"}]},
-          "currency": {"anyOf": [{"type": "string"}, {"type": "null"}]},
-          "seniority": {"type": "string", "enum": ["junior", "middle", "senior", "lead", "unknown"]},
-          "skills": {"type": "array", "items": {"type": "string"}}
-        }}}}
-  }' | grep -i "^x-litellm-model"
-python3 -c 'import json; print(json.loads(json.load(open("/tmp/vp.json"))["choices"][0]["message"]["content"]))'
+python3 tools/smoke-json-schema.py --model standard --n 3      # strict json_schema through the chain
+python3 tools/smoke-json-schema.py --all-chat --n 2 --no-fallback   # survey every chat route
 ```
 
-The `x-litellm-model-id` / `x-litellm-model-api-base` headers say which
-deployment answered; the second command prints the parsed object.
-
-### Re-verify the route
-
-```bash
-python3 tools/smoke-json-schema.py --model vacancy-parse --n 5          # must be 5/5, exit 0
-python3 tools/smoke-json-schema.py --all-chat --n 2 --no-fallback       # survey every chat route
-```
-
-A deployment may join `JSON_SCHEMA_VERIFIED` only after a `--no-fallback`
-run with 5/5; then add it to the fork section and let the tests confirm.
+The first prints which deployment answered each attempt (headers
+`x-litellm-model-id` / `x-litellm-model-api-base`) and whether the answer
+matched the schema. `standard` keeps providers that cannot do strict JSON,
+so a failed attempt there is information, not a defect — see
+`docs/USAGE.md` → Structured output.
 
 ## Known limits (2026-09-16)
 
 - OVHcloud anonymous deployments fail inside LiteLLM v1.97.0 (`api_key: ""`
-  is rejected by the OpenAI client before the request leaves). Upstream issue;
-  they are not part of the `vacancy-parse` chain.
+  is rejected by the OpenAI client before the request leaves). Upstream
+  issue; they join the `standard` chain only when `OVHCLOUD_API_KEY` is set.
 - The proxy's own rpm budget rejects the request that would reach the limit
-  (`rpm: 2` allows one call per minute). Fork deployments use `rpm: 10` / `4`.
-- Gemini `3.5-flash` / `3.6-flash` answer schema-valid JSON but hit 503 "high
-  demand" often enough to miss 5/5; not verified yet.
+  (`rpm: 2` allows one call per minute per deployment). `standard` walks on
+  to the next deployment, so the client only sees this when the whole chain
+  is spent.
+- Gemini `3.5-flash` / `3.6-flash` answer schema-valid JSON but hit 503
+  "high demand" often; the verified table lists the `-lite` variants.

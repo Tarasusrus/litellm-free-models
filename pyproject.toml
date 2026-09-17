@@ -27,6 +27,11 @@ ignore = [
     "E402",
 ]
 
+# Fork: upstream code trips UP038 (isinstance with a tuple) on the ruff
+# versions CI installs; ignored here instead of rewriting upstream lines.
+[tool.ruff.lint.per-file-ignores]
+"find-shared-models.py" = ["UP038"]
+
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
