@@ -54,6 +54,7 @@ marked `# Fork:`; on a sync, keep ours.
 | `.github/workflows/ci.yml` | installs `requirements-dev.txt` (hypothesis), renders through `fork/render.py`, drift check on `docs/upstream-README.md` | CI must exercise the fork's renderer |
 | `pyproject.toml` | per-file ruff ignore for `find-shared-models.py` (`UP038`) | upstream code trips a rule newer ruff enables; ignoring it is a one-line, conflict-free fix |
 | `AGENTS.md` | regenerated model matrix only | generated content |
+| `.github/workflows/sync-models.yml` | `schedule` trigger commented out, `workflow_dispatch` kept | this fork has no `SYNC_*` secrets; the scheduled run would fail loudly every week with nothing to act on (`docs/upstream-sync.md`) |
 
 ### 3. The `standard` route
 
