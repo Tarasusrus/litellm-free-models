@@ -17,10 +17,14 @@
 # =============================================================================
 name: Sync Free Models (weekly PR)
 
+# Fork: schedule trigger disabled (docs/upstream-sync.md). This fork has no
+# SYNC_* secrets configured, so the scheduled run fails loudly at the .env
+# step every week for no actionable reason. workflow_dispatch stays so the
+# catalog sync can still be run by hand.
 on:
-  schedule:
-    # Every Monday at 06:00 UTC
-    - cron: "0 6 * * 1"
+  # schedule:
+  #   # Every Monday at 06:00 UTC
+  #   - cron: "0 6 * * 1"
   workflow_dispatch:
 
 permissions:
