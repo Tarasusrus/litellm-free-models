@@ -75,3 +75,46 @@ class TestExportsRoundTrip(unittest.TestCase):
 class TestEveryProviderVarIsExported(unittest.TestCase):
     def test_set_of_exported_vars(self):
         self.assertEqual(sorted(env_exports.PROVIDER_VARS), PROVIDER_VARS)
+
+
+# ─── REDIS_PASSWORD / DATABASE_URL ──────────────────────────────────────────
+#
+# config.template.yaml resolves both through os.environ/..., and
+# fork/ensure_secrets.py (the env-init compose service) may only have
+# generated the underlying passwords after compose already interpolated its
+# own, still-empty ${POSTGRES_PASSWORD}/${REDIS_PASSWORD} into this
+# container's environment -- the entrypoint has to rebuild both from the
+# live .env, the same way it already does for provider keys.
+
+class TestRedisPasswordAndDatabaseUrl(unittest.TestCase):
+    @settings(max_examples=40, deadline=None)
+    @given(password=values)
+    def test_redis_password_is_exported_when_present(self, password):
+        self.assertEqual(_shell_sees(f"REDIS_PASSWORD={password}\n", "REDIS_PASSWORD"), password)
+
+    def test_no_redis_password_line_without_one_in_env(self):
+        script = env_exports.exports({})
+        self.assertNotIn("REDIS_PASSWORD", script)
+
+    @settings(max_examples=40, deadline=None)
+    @given(user=values, password=values, db=values)
+    def test_database_url_assembles_from_postgres_vars(self, user, password, db):
+        env = {"POSTGRES_USER": user, "POSTGRES_PASSWORD": password, "POSTGRES_DB": db}
+        self.assertEqual(env_exports.database_url(env),
+                         f"postgresql://{user}:{password}@postgres:5432/{db}")
+
+    def test_database_url_falls_back_to_compose_defaults(self):
+        self.assertEqual(env_exports.database_url({"POSTGRES_PASSWORD": "x"}),
+                         "postgresql://litellm:x@postgres:5432/litellm")
+
+    def test_no_database_url_without_a_postgres_password(self):
+        self.assertIsNone(env_exports.database_url({}))
+        self.assertIsNone(env_exports.database_url({"POSTGRES_USER": "litellm"}))
+        self.assertNotIn("DATABASE_URL", env_exports.exports({"POSTGRES_USER": "litellm"}))
+
+    @settings(max_examples=30, deadline=None)
+    @given(password=values)
+    def test_database_url_line_carries_the_live_password(self, password):
+        script = env_exports.exports({"POSTGRES_PASSWORD": password})
+        self.assertIn("@postgres:5432/litellm", script)
+        self.assertIn(password, script)

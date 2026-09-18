@@ -39,7 +39,7 @@
 
 ```bash
 git clone https://github.com/Tarasusrus/litellm-free-models.git && cd litellm-free-models
-cp .env.example .env      # задать LITELLM_MASTER_KEY, POSTGRES_PASSWORD, REDIS_PASSWORD + ключи провайдеров
+cp .env.example .env      # задать LITELLM_MASTER_KEY + ключи провайдеров
 docker compose up -d
 ```
 
@@ -50,6 +50,12 @@ docker compose up -d
 внутри compose-сети. Провайдеры с пустым
 ключом просто не попадают в конфиг. Рестарт, обновление, остановка —
 [docs/run.md](docs/run.md).
+
+`POSTGRES_PASSWORD` и `REDIS_PASSWORD` — внутренние пароли только для
+compose-сети, руками задавать не нужно: первый `docker compose up`
+генерирует их в `.env`, повторные запуски не трогают. Оставили пустым и
+`LITELLM_MASTER_KEY` — тоже сгенерируется, один раз, значение видно в
+`docker compose logs env-init`.
 
 ## Подключить клиента
 

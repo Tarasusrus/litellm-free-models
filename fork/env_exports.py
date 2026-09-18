@@ -8,9 +8,15 @@ environment only when the container is created — a plain
 current values at every start makes `.env` the single source of truth,
 so a key change needs a restart, not a recreate.
 
-Only the variables providers_config.py knows (API keys and api_base
-variables) are exported; passwords and the master key keep coming from
-compose.
+The variables providers_config.py knows (API keys and api_base
+variables) are exported this way, and so are REDIS_PASSWORD and a
+computed DATABASE_URL: config.template.yaml resolves both through
+os.environ/..., and fork/ensure_secrets.py (the env-init compose
+service) may only have generated them after compose already
+interpolated its own, unset, `${POSTGRES_PASSWORD}`/`${REDIS_PASSWORD}`
+placeholders. The master key needs no export -- fork/render.py
+substitutes `{{LITELLM_MASTER_KEY}}` straight from `.env` into
+config.yaml, read fresh at every start.
 """
 from __future__ import annotations
 
@@ -46,8 +52,24 @@ def load(path: Path) -> dict[str, str]:
     return env
 
 
+def database_url(env: dict[str, str]) -> str | None:
+    """postgresql://user:password@postgres:5432/db, or None without a
+    password -- same defaults compose itself falls back to."""
+    password = env.get("POSTGRES_PASSWORD", "")
+    if not password:
+        return None
+    user = env.get("POSTGRES_USER") or "litellm"
+    db = env.get("POSTGRES_DB") or "litellm"
+    return f"postgresql://{user}:{password}@postgres:5432/{db}"
+
+
 def exports(env: dict[str, str]) -> str:
     lines = [f"export {var}={shlex.quote(env[var])}" for var in PROVIDER_VARS if var in env]
+    if env.get("REDIS_PASSWORD"):
+        lines.append(f"export REDIS_PASSWORD={shlex.quote(env['REDIS_PASSWORD'])}")
+    url = database_url(env)
+    if url:
+        lines.append(f"export DATABASE_URL={shlex.quote(url)}")
     return "\n".join(lines) + ("\n" if lines else "")
 
 

@@ -37,7 +37,7 @@ What the fork adds:
 
 ```bash
 git clone https://github.com/Tarasusrus/litellm-free-models.git && cd litellm-free-models
-cp .env.example .env      # set LITELLM_MASTER_KEY, POSTGRES_PASSWORD, REDIS_PASSWORD + provider keys
+cp .env.example .env      # set LITELLM_MASTER_KEY + provider keys
 docker compose up -d
 ```
 
@@ -48,6 +48,12 @@ settings page (`127.0.0.1:4445`) are published; Postgres and Redis stay
 inside the compose network. Providers
 whose key is empty are simply left out. See [docs/run.md](docs/run.md) for
 restart, update and stop.
+
+`POSTGRES_PASSWORD` and `REDIS_PASSWORD` are internal, compose-network-only
+credentials — nothing to set by hand; the first `docker compose up`
+generates them into `.env` and later runs leave them alone. Left
+`LITELLM_MASTER_KEY` empty too? Same thing — generated once, printed to
+`docker compose logs env-init`.
 
 ## Connect a client
 
