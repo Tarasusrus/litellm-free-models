@@ -11,6 +11,11 @@ Everything below is run from the repo root.
 | `litellm-redis` | response cache + router state | none |
 | `litellm-postgres` | keys / spend log | none |
 | `litellm-settings-ui` | settings page (provider keys) | `127.0.0.1:4445` → 4445 |
+| `litellm-env-init` | generates the internal passwords once, then exits 0 | none |
+
+`litellm-env-init` exiting right after `up` is expected, not a crash —
+`docker compose ps` shows it `Exited (0)`; it only runs again, and only
+does anything, when one of the three secrets it manages is still empty.
 
 Only the proxy port and the settings page are published; the page is bound
 to loopback. Change them with `LITELLM_PORT=…` / `SETTINGS_UI_PORT=…` in
@@ -27,8 +32,13 @@ cp .env.example .env
 chmod 600 .env
 ```
 
-Required: `LITELLM_MASTER_KEY`, `POSTGRES_PASSWORD`, `REDIS_PASSWORD`
-(`openssl rand -hex 16` for the passwords). Every provider key is optional;
+Required from the operator: `LITELLM_MASTER_KEY` and at least one provider
+key. `POSTGRES_PASSWORD` and `REDIS_PASSWORD` are internal, compose-network
+credentials, not something to obtain or type — the first `docker compose
+up` generates them into `.env` (`env-init`, `fork/ensure_secrets.py`) and
+leaves them alone after that. Left `LITELLM_MASTER_KEY` at the
+`.env.example` placeholder or empty? Same generator fills it in once,
+printed to `docker compose logs env-init`. Every provider key is optional;
 a provider whose key is empty is left out of the config and of the
 `standard` chain. `LLM7IO_API_KEY=unused` keeps LLM7's anonymous tier in
 (any non-empty value works).
@@ -66,8 +76,9 @@ every start (`fork/docker-entrypoint.sh` exports them), so a restart is
 enough; a recreate (`up -d`) is only needed for compose-level changes such
 as ports or passwords.
 
-Changing `POSTGRES_PASSWORD` after the first start also needs
-`docker compose down -v` (drops the DB volume) or a manual `ALTER ROLE`.
+Changing `POSTGRES_PASSWORD` by hand after the first start also needs
+`docker compose down -v` (drops the DB volume) or a manual `ALTER ROLE` --
+the same reason `env-init` never regenerates a value that is already set.
 
 ## Render on the host (optional)
 

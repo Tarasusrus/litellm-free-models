@@ -6,9 +6,11 @@ JSON API behind the proxy's master key:
 
   GET  /api/providers            every provider from providers_config.py:
                                  masked key, state, console link, last check
-  POST /api/check {provider}     live catalogue query with the stored key
-                                 (fetch_* from find-shared-models.py), cached
-                                 per key value for the life of the process
+  POST /api/check {provider,     live catalogue query with the given key, or
+                    value?}      the one stored in `.env` when `value` is
+                                 absent (fetch_* from find-shared-models.py),
+                                 cached per key value for the life of the
+                                 process
   POST /api/apply {values}       write the keys to `.env` (temp + rename,
                                  0600, other lines untouched), restart the
                                  proxy through the Docker socket, wait for
@@ -415,8 +417,17 @@ class App:
             rows.append(r)
         return {"providers": rows}
 
-    def check(self, name: str) -> dict[str, Any]:
-        return self.checker.check(name, self.env())
+    def check(self, name: str, value: str | None = None) -> dict[str, Any]:
+        """Checks `value` when given (the field's live content, maybe not
+        yet applied); falls back to the key stored in `.env`.
+        """
+        env = self.env()
+        if value is not None:
+            env = dict(env)
+            var = PROVIDERS[name].env_var
+            if var:
+                env[var] = value
+        return self.checker.check(name, env)
 
     def apply(self, values: dict[str, str]) -> dict[str, Any]:
         with self._write_lock:
@@ -491,7 +502,10 @@ class Handler(BaseHTTPRequestHandler):
                 if name not in PROVIDERS:
                     self._json(404, {"error": "unknown provider"})
                     return
-                self._json(200, self.app.check(name))
+                value = data.get("value")
+                if value is not None and not isinstance(value, str):
+                    raise ValueError("value must be a string")
+                self._json(200, self.app.check(name, value))
             elif path == "/api/apply":
                 values = data.get("values")
                 if not isinstance(values, dict):

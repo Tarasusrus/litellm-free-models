@@ -5,17 +5,38 @@
 # still there for K8s and the standalone `make docker-run`.
 
 services:
+  # Fork: generates POSTGRES_PASSWORD, REDIS_PASSWORD and LITELLM_MASTER_KEY
+  # into .env when they are empty, and copies the two passwords into
+  # secrets-data as plain files (fork/ensure_secrets.py). postgres and
+  # redis need a real password at their own container start -- before
+  # anything of ours runs -- and compose interpolates every ${VAR} in this
+  # file once, at the start of `docker compose up`, so a value this step
+  # generates can never reach that interpolation; only a file the next two
+  # services read for themselves can. A value already in .env is left
+  # alone, on purpose: regenerating POSTGRES_PASSWORD on a later `up`
+  # would lock the proxy out of the existing postgres-data volume.
+  env-init:
+    image: python:3.12-alpine
+    container_name: ${ENV_INIT_CONTAINER_NAME:-litellm-env-init}
+    volumes:
+      - ./:/repo
+      - secrets-data:/run/secrets
+    command: ["python3", "/repo/fork/ensure_secrets.py", "--env", "/repo/.env", "--secrets-dir", "/run/secrets"]
+    networks:
+      - litellm-network
+
   postgres:
     image: postgres:16-alpine
     container_name: ${POSTGRES_CONTAINER_NAME:-litellm-postgres}
     environment:
       - POSTGRES_USER=${POSTGRES_USER:-litellm}
-      # No default on purpose: a silently ignored password is worse than a
-      # hard startup error. Set POSTGRES_PASSWORD in .env (see .env.example).
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+      # Fork: read from the file env-init writes, not ${POSTGRES_PASSWORD}
+      # -- see the comment on env-init above.
+      - POSTGRES_PASSWORD_FILE=/run/secrets/postgres_password
       - POSTGRES_DB=${POSTGRES_DB:-litellm}
     volumes:
       - postgres-data:/var/lib/postgresql/data
+      - secrets-data:/run/secrets:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-litellm} -d ${POSTGRES_DB:-litellm}"]
       interval: 10s
@@ -25,31 +46,31 @@ services:
     networks:
       - litellm-network
     restart: unless-stopped
+    depends_on:
+      env-init:
+        condition: service_completed_successfully
 
   redis:
     image: redis:7-alpine
     container_name: ${REDIS_CONTAINER_NAME:-litellm-redis}
-    # --requirepass erzwingt Passwort-Auth. Kein Default: REDIS_PASSWORD muss
-    # in .env gesetzt sein (siehe .env.example), sonst schlaegt der Start
-    # laut fehl statt still mit einem bekannten Default-Passwort zu laufen.
+    # --requirepass erzwingt Passwort-Auth.
     # --save "" = reiner LRU-Cache ohne Persistenz (Cache-Daten sind
     # verzichtbar und waermen sich selbst wieder auf; keine BGSAVE-Forks).
+    # Fork: the password is read from the file env-init writes at container
+    # start (a shell wrapper, since redis-server has no --requirepass-file)
+    # -- see the comment on env-init above.
+    entrypoint: ["/bin/sh", "-c"]
     command:
-      - "redis-server"
-      - "--port"
-      - "${REDIS_PORT:-6379}"
-      - "--requirepass"
-      - "${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}"
-      - "--maxmemory"
-      - "256mb"
-      - "--maxmemory-policy"
-      - "allkeys-lru"
-      - "--save"
-      - ""
+      - >
+        exec redis-server --port "${REDIS_PORT:-6379}"
+        --requirepass "$(cat /run/secrets/redis_password)"
+        --maxmemory 256mb --maxmemory-policy allkeys-lru --save ""
+    volumes:
+      - secrets-data:/run/secrets:ro
     healthcheck:
       # -e: Exit-Code != 0 bei Error-Replies (z.B. NOAUTH), sonst ist der
       # Healthcheck auch bei kaputter Auth immer gruen.
-      test: ["CMD", "redis-cli", "-p", "${REDIS_PORT:-6379}", "-a", "${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}", "-e", "ping"]
+      test: ["CMD-SHELL", "redis-cli -p ${REDIS_PORT:-6379} -a \"$(cat /run/secrets/redis_password)\" -e ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -57,6 +78,9 @@ services:
     networks:
       - litellm-network
     restart: unless-stopped
+    depends_on:
+      env-init:
+        condition: service_completed_successfully
 
   litellm-proxy:
     # Fork: the official image plus the repo mounted read-only; the
@@ -86,11 +110,17 @@ services:
       - LLM7IO_API_KEY=${LLM7IO_API_KEY}
       - HF_TOKEN=${HF_TOKEN}
       # PostgreSQL Database URL for LiteLLM (key management, spend tracking, etc.)
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-litellm}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}@postgres:5432/${POSTGRES_DB:-litellm}
+      # Fork: no ${POSTGRES_PASSWORD:?...} here -- compose interpolates this
+      # once, before env-init has generated it on a first run. Empty here is
+      # a placeholder; fork/docker-entrypoint.sh rebuilds DATABASE_URL from
+      # the live .env (fork/env_exports.py) before LiteLLM starts, and by
+      # then postgres is already healthy, so a real password exists.
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-litellm}:${POSTGRES_PASSWORD:-}@postgres:5432/${POSTGRES_DB:-litellm}
       # Redis (resolved by LiteLLM via os.environ/REDIS_* in config.yaml)
       - REDIS_HOST=redis
       - REDIS_PORT=${REDIS_PORT:-6379}
-      - REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}
+      # Fork: same placeholder-then-rebuild reasoning as DATABASE_URL above.
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
     volumes:
       # Fork: the whole repo (template, renderer, fork/, .env) read-only;
       # the rendered config never touches the host.
@@ -145,4 +175,8 @@ networks:
 
 volumes:
   postgres-data:
+    driver: local
+  # Fork: postgres_password / redis_password, written by env-init
+  # (fork/ensure_secrets.py) before postgres and redis start.
+  secrets-data:
     driver: local

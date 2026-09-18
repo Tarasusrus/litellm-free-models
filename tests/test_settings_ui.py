@@ -20,9 +20,9 @@ from unittest import mock
 from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 
+import onboard
 from fork import settings_ui, standard
 from providers_config import PROVIDERS
-import onboard
 
 PROVIDER_VARS = sorted(settings_ui.EDITABLE_VARS)
 
@@ -220,6 +220,68 @@ class TestKeyCheck(unittest.TestCase):
         self.assertEqual(res["status"], "unsupported")
 
 
+# ─── App.check: unsaved field value overrides the stored key ───────────────
+#
+# Settings page "Check" must probe what is sitting in the input, not the key
+# already on disk -- until "Apply" runs, the two can disagree entirely. Ranges
+# for the two model counts are kept disjoint so any example tells the two
+# code paths apart: a build that quietly falls back to `.env` regardless of
+# `value` reports the stored count where the given count was expected.
+
+class TestAppCheckValue(unittest.TestCase):
+    def _app(self, stored_key: str) -> settings_ui.App:
+        env_path = _tmp_env(f"GROQ_API_KEY={stored_key}\n")
+        return settings_ui.App(env_path=env_path, checker=settings_ui.KeyChecker(),
+                                restart=lambda: None, proxy=lambda master, wait: {})
+
+    @settings(max_examples=40, deadline=None)
+    @given(stored=secrets_, given=secrets_,
+           n_stored=st.integers(0, 5), n_given=st.integers(6, 11))
+    def test_value_overrides_the_stored_key(self, stored, given, n_stored, n_given):
+        assume(not onboard.is_placeholder(stored) and not onboard.is_placeholder(given))
+        assume(stored != given)
+
+        def fake_get(url, headers, timeout=30):
+            used = headers["Authorization"].removeprefix("Bearer ")
+            count = n_given if used == given else n_stored if used == stored else 0
+            return {"data": [{"id": f"m{i}"} for i in range(count)]}
+
+        app = self._app(stored)
+        with mock.patch.object(settings_ui.fsm, "http_get_json", side_effect=fake_get):
+            res_given = app.check("groq", value=given)
+            res_stored = app.check("groq")
+
+        self.assertEqual(res_given["models"], n_given)
+        self.assertEqual(res_stored["models"], n_stored)
+
+    @settings(max_examples=30, deadline=None)
+    @given(stored=secrets_, given=secrets_)
+    def test_neither_key_leaks_into_the_result(self, stored, given):
+        assume(not onboard.is_placeholder(stored) and not onboard.is_placeholder(given))
+        err_given = urllib.error.HTTPError("https://x", 401, "bad " + given, {}, None)
+        app = self._app(stored)
+        with mock.patch.object(settings_ui.fsm, "http_get_json", side_effect=err_given):
+            res = app.check("groq", value=given)
+        blob = json.dumps(res)
+        self.assertNotIn(given, blob)
+        self.assertNotIn(stored, blob)
+
+    def test_empty_value_is_checked_as_missing_even_with_a_stored_key(self):
+        app = self._app("gsk_live_0123456789")
+        with mock.patch.object(settings_ui.fsm, "http_get_json") as get:
+            res = app.check("groq", value="")
+        self.assertEqual(res["status"], "missing")
+        get.assert_not_called()
+
+    def test_no_value_falls_back_to_stored_key(self):
+        app = self._app("gsk_live_0123456789")
+        data = {"data": [{"id": "a"}]}
+        with mock.patch.object(settings_ui.fsm, "http_get_json", return_value=data) as get:
+            res = app.check("groq")
+        self.assertEqual(res["status"], "ok")
+        get.assert_called_once()
+
+
 # ─── chain from the container log ───────────────────────────────────────────
 
 model_ids = st.from_regex(r"\A[a-z0-9]+/[A-Za-z0-9.\-]+\Z")
@@ -353,4 +415,34 @@ class TestHttpApi(unittest.TestCase):
     def test_unknown_provider_check_is_404(self):
         status, _ = self.srv.request("POST", "/api/check", {"provider": "nope"}, key=self.MASTER)
         self.assertEqual(status, 404)
+
+    def test_check_with_value_probes_the_given_key_not_env(self):
+        # .env has GROQ_API_KEY=gsk_live_0123456789 (setUp); a different,
+        # unsaved key must be the one that actually gets probed.
+        unsaved = "gsk_live_unsaved0000000000"
+
+        def fake_get(url, headers, timeout=30):
+            used = headers["Authorization"].removeprefix("Bearer ")
+            n = 3 if used == unsaved else 1
+            return {"data": [{"id": f"m{i}"} for i in range(n)]}
+
+        with mock.patch.object(settings_ui.fsm, "http_get_json", side_effect=fake_get):
+            status, body = self.srv.request(
+                "POST", "/api/check", {"provider": "groq", "value": unsaved}, key=self.MASTER)
+        self.assertEqual(status, 200, body)
+        self.assertEqual(json.loads(body)["models"], 3)
+        self.assertNotIn(unsaved, body)
+
+    def test_check_without_value_still_probes_env(self):
+        with mock.patch.object(settings_ui.fsm, "http_get_json",
+                                return_value={"data": [{"id": "a"}]}):
+            status, body = self.srv.request(
+                "POST", "/api/check", {"provider": "groq"}, key=self.MASTER)
+        self.assertEqual(status, 200, body)
+        self.assertEqual(json.loads(body)["models"], 1)
+
+    def test_check_rejects_non_string_value(self):
+        status, _ = self.srv.request(
+            "POST", "/api/check", {"provider": "groq", "value": 123}, key=self.MASTER)
+        self.assertEqual(status, 400)
 
