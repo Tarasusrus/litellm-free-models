@@ -153,8 +153,13 @@
     const cell = $("st-" + name);
     cell.innerHTML += `<br><span class="muted">checking…</span>`;
     try {
-      const res = await api("POST", "/api/check", { provider: name });
-      const p = providers.find(p => p.name === name); p.check = res;
+      const p = providers.find(p => p.name === name);
+      const body = { provider: name };
+      if (p && p.env_var && Object.prototype.hasOwnProperty.call(dirty, p.env_var)) {
+        body.value = dirty[p.env_var];
+      }
+      const res = await api("POST", "/api/check", body);
+      if (p) p.check = res;
       cell.innerHTML = stateText(p);
     } catch (e) { cell.innerHTML += `<br><span class="bad">${esc(e.message)}</span>`; }
     if (btn) btn.disabled = false;
