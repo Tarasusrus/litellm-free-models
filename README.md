@@ -22,6 +22,10 @@ What the fork adds:
   one model name, tried in a fixed provider order (Gemini → Groq →
   OpenRouter → Mistral → NVIDIA → … → anonymous tiers last). A new key in
   `.env` joins the chain on the next start; nothing to edit by hand.
+- **`tools` route** — the same chain narrowed to the deployments that
+  completed a live two-step tool call on every attempt. For agents with
+  MCP servers: `standard` does not guarantee tool calling.
+  See [Tool calling / MCP agents](#tool-calling--mcp-agents).
 - **One-command start** — `docker compose up -d` renders the config inside
   the proxy container. No `make render-config` on the host.
 - **Settings UI** — a local page for provider keys: status, live check,
@@ -81,7 +85,29 @@ print(reply.choices[0].message.content)
 Every upstream alias (`gpt-oss-120b`, `llama-3.3-70b-instruct`, embeddings,
 audio, …) is still available by name — see the model matrix in the
 [upstream README](docs/upstream-README.md#-models). Request/response format,
-structured output, limits and error codes: [docs/USAGE.md](docs/USAGE.md).
+structured output, tool calling, limits and error codes: [docs/USAGE.md](docs/USAGE.md).
+
+## Tool calling / MCP agents
+
+An agent that calls tools (its own functions or an MCP server's) sends
+`model: "tools"` with `tools` in the usual OpenAI format. Behind the name
+are the `standard` providers in the same order, but only the models that
+returned a correct `tool_calls` in a live check; the verified list with
+dates is `TOOL_CALLING_VERIFIED` in [`fork/tools_route.py`](fork/tools_route.py).
+`standard` keeps every provider, including ones that silently drop the
+tool definitions and answer with prose — do not use it for agents.
+
+```python
+first = client.chat.completions.create(model="tools", messages=messages, tools=tools)
+call = first.choices[0].message.tool_calls[0]           # step 1: the model asks for a tool
+messages += [first.choices[0].message,
+             {"role": "tool", "tool_call_id": call.id, "content": run(call)}]
+final = client.chat.completions.create(model="tools", messages=messages, tools=tools)  # step 2
+```
+
+Full two-step example, an MCP client that feeds a server's tool list into
+`tools`, and how to re-check a backend:
+[docs/USAGE.md → Tool calling / MCP agents](docs/USAGE.md#tool-calling--mcp-agents-model-tools).
 
 ## Settings UI
 
@@ -101,7 +127,8 @@ What it shows — one row per provider from `providers_config.py`, in
 
 **Apply** writes the changed keys to `.env` (atomic replace, mode 0600,
 every other line untouched), restarts the proxy through the Docker socket,
-waits for readiness and prints the `standard` chain the proxy rendered.
+waits for readiness and prints the `standard` and `tools` chains the
+proxy rendered.
 Keys are only ever masked in API responses and never logged. The page
 edits provider variables only; the master key and the passwords stay
 hands-on in `.env`.
@@ -118,9 +145,10 @@ master key.
 2. Put it into `.env` (variable names are in `.env.example`).
 3. `docker compose restart litellm-proxy` — the proxy reads the keys from
    `.env` at every start, re-renders the config and the provider's chat
-   models join the `standard` chain at their priority slot.
+   models join the `standard` chain at their priority slot (and `tools`
+   once they are in its allowlist).
 
-The current chain is printed in the proxy's startup log
+The current chains are printed in the proxy's startup log
 (`docker compose logs litellm-proxy | grep -A200 "'standard' route"`), or
 locally with `python3 fork/render.py --output /tmp/config.yaml`.
 

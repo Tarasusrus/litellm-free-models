@@ -40,7 +40,7 @@
 <body>
 <main>
   <h1>Proxy settings</h1>
-  <p class="sub">Provider keys for the <code>standard</code> route. Apply writes <code>.env</code> and restarts the proxy.</p>
+  <p class="sub">Provider keys for the <code>standard</code> and <code>tools</code> routes. Apply writes <code>.env</code> and restarts the proxy.</p>
 
   <section id="login">
     <label for="master">Master key (<code>LITELLM_MASTER_KEY</code> from <code>.env</code>)</label>
@@ -177,9 +177,11 @@
       : `<span class="bad">proxy not ready</span>`;
     const lines = [];
     lines.push(px.ready ? `Proxy ready. /v1/models: ${px.models.length} names.` : "Proxy not ready.");
-    if (px.chain && px.chain.length) {
-      lines.push(`'standard' chain (${px.chain.length}):`);
-      px.chain.forEach(c => lines.push(`  ${String(c.order).padStart(2)}. ${c.provider.padEnd(13)} ${c.model}`));
+    const chains = px.chains || (px.chain && px.chain.length ? { standard: px.chain } : {});
+    for (const route of ["standard", "tools"]) {
+      const chain = chains[route] || [];
+      lines.push(`'${route}' chain (${chain.length}):`);
+      chain.forEach(c => lines.push(`  ${String(c.order).padStart(2)}. ${c.provider.padEnd(13)} ${c.model}`));
     }
     $("log").textContent = lines.join("\n");
     $("log").classList.remove("muted");

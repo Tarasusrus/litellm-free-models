@@ -21,7 +21,7 @@ from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 
 import onboard
-from fork import settings_ui, standard
+from fork import settings_ui, standard, tools_route
 from providers_config import PROVIDERS
 
 PROVIDER_VARS = sorted(settings_ui.EDITABLE_VARS)
@@ -316,6 +316,41 @@ class TestChainFromLog(unittest.TestCase):
 
     def test_no_route_header_means_no_chain(self):
         self.assertEqual(settings_ui.parse_chain("  1. groq groq/x\nsomething\n"), [])
+        self.assertEqual(settings_ui.parse_chains("  1. groq groq/x\nsomething\n"), {})
+
+    @settings(max_examples=60, deadline=None)
+    @given(before=noise_lines, std=chain_entries, tools=chain_entries, after=noise_lines,
+           stale=chain_entries, chunk=st.integers(1, 64))
+    def test_both_routes_are_recovered_from_one_start(self, before, std, tools, after, stale, chunk):
+        # fork/render.py prints `standard` then `tools` back to back at every
+        # start; the page shows both, each from the last start only.
+        def block(route, items):
+            lines = [f"'{route}' route: {len(items)} deployment(s) in priority order"]
+            lines += [f"  {n:>2}. {prov:<13} {mid}" for n, (prov, mid) in enumerate(items, 1)]
+            return lines
+        log = "\n".join(before + block("standard", stale) + block("tools", stale) + after
+                        + block("standard", std) + block("tools", tools) + after) + "\n"
+        chains = settings_ui.parse_chains(settings_ui._demux(_frames(log, chunk)))
+        want = {route: [(n, p, m) for n, (p, m) in enumerate(items, 1)]
+                for route, items in (("standard", std), ("tools", tools))}
+        self.assertEqual({r: [(c["order"], c["provider"], c["model"]) for c in cs]
+                          for r, cs in chains.items()}, want)
+        # the old entry point still answers with `standard`
+        self.assertEqual(settings_ui.parse_chain(log), chains["standard"])
+
+    @settings(max_examples=60, deadline=None)
+    @given(std=chain_entries, tools=chain_entries)
+    def test_tools_block_is_a_subsequence_only_when_the_renderer_says_so(self, std, tools):
+        # parse_chains reports what was printed; it does not "fix" the
+        # tools chain to be a subset of standard. That property is
+        # tools_route's (tests/test_tools_route.py), not the page's.
+        log = "\n".join([f"'standard' route: {len(std)} deployment(s) in priority order"]
+                        + [f"  {n}. {p} {m}" for n, (p, m) in enumerate(std, 1)]
+                        + [f"'{tools_route.ROUTE_NAME}' route: {len(tools)} deployment(s) in priority order"]
+                        + [f"  {n}. {p} {m}" for n, (p, m) in enumerate(tools, 1)]) + "\n"
+        chains = settings_ui.parse_chains(log)
+        self.assertEqual(len(chains.get("tools", [])), len(tools))
+        self.assertEqual(len(chains.get("standard", [])), len(std))
 
 
 # ─── HTTP API ───────────────────────────────────────────────────────────────

@@ -14,8 +14,9 @@ JSON API behind the proxy's master key:
   POST /api/apply {values}       write the keys to `.env` (temp + rename,
                                  0600, other lines untouched), restart the
                                  proxy through the Docker socket, wait for
-                                 readiness, report the `standard` chain
-  GET  /api/proxy                readiness, model names, current chain
+                                 readiness, report the `standard` and
+                                 `tools` chains
+  GET  /api/proxy                readiness, model names, current chains
 
 Secrets never leave the process: responses carry masks, error messages
 are scrubbed, request bodies are not logged.
@@ -51,7 +52,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from fork import standard  # noqa: E402
+from fork import standard, tools_route  # noqa: E402
 from providers_config import PROVIDERS  # noqa: E402
 
 
@@ -284,24 +285,38 @@ def _demux(stream: bytes) -> str:
 
 
 _CHAIN_LINE = re.compile(r"^\s*(\d+)\.\s+(\S+)\s+(\S+)\s*$")
+_ROUTE_HEADER = re.compile(r"'([a-z][a-z0-9_-]*)' route: \d+ deployment\(s\)")
+
+# The routes fork/render.py prints at every start, in print order.
+ROUTES: tuple[str, ...] = (standard.ROUTE_NAME, tools_route.ROUTE_NAME)
+
+
+def parse_chains(log_text: str) -> dict[str, list[dict[str, Any]]]:
+    """Every generated route's chain as fork/render.py printed it at the
+    last start: `{'standard': [...], 'tools': [...]}`. A route printed
+    twice (two starts in the log) keeps its last block."""
+    chains: dict[str, list[dict[str, Any]]] = {}
+    active: str | None = None
+    for line in log_text.splitlines():
+        m = _ROUTE_HEADER.search(line)
+        if m:
+            active = m.group(1)
+            chains[active] = []
+            continue
+        if active is None:
+            continue
+        m = _CHAIN_LINE.match(line)
+        if m:
+            chains[active].append({"order": int(m.group(1)), "provider": m.group(2),
+                                   "model": m.group(3)})
+        else:
+            active = None
+    return chains
 
 
 def parse_chain(log_text: str) -> list[dict[str, Any]]:
     """The `standard` chain fork/render.py printed at the last start."""
-    chain: list[dict[str, Any]] = []
-    active = False
-    for line in log_text.splitlines():
-        if f"'{standard.ROUTE_NAME}' route:" in line:
-            chain, active = [], True
-            continue
-        if not active:
-            continue
-        m = _CHAIN_LINE.match(line)
-        if m:
-            chain.append({"order": int(m.group(1)), "provider": m.group(2), "model": m.group(3)})
-        elif chain:
-            active = False
-    return chain
+    return parse_chains(log_text).get(standard.ROUTE_NAME, [])
 
 
 def _started_at(container: str, sock_path: str) -> int:
@@ -317,13 +332,13 @@ def _started_at(container: str, sock_path: str) -> int:
     return calendar.timegm(tuple(int(x) for x in m.groups()) + (0, 0, 0))
 
 
-def docker_chain(container: str, sock_path: str = "/var/run/docker.sock",
-                 max_bytes: int = 2 * 1024 * 1024) -> list[dict[str, Any]]:
-    """The chain printed at the container's current start.
+def docker_chains(container: str, sock_path: str = "/var/run/docker.sock",
+                  max_bytes: int = 2 * 1024 * 1024) -> dict[str, list[dict[str, Any]]]:
+    """The chains printed at the container's current start.
 
-    fork/render.py prints it before LiteLLM boots, so the log is read from
-    the run's start and only as far as the block goes; the boot chatter
-    after it (a thousand lines and growing with traffic) is never pulled.
+    fork/render.py prints them before LiteLLM boots, so the log is read from
+    the run's start and only as far as the blocks go; the boot chatter
+    after them (a thousand lines and growing with traffic) is never pulled.
     """
     since = _started_at(container, sock_path)
     conn = _UnixHTTPConnection(sock_path, timeout=30)
@@ -331,7 +346,7 @@ def docker_chain(container: str, sock_path: str = "/var/run/docker.sock",
         conn.request("GET", f"/containers/{container}/logs?stdout=1&stderr=1&since={since}")
         resp = conn.getresponse()
         if resp.status != 200:
-            return []
+            return {}
         buf = b""
         while len(buf) < max_bytes:
             chunk = resp.read(8192)
@@ -339,19 +354,29 @@ def docker_chain(container: str, sock_path: str = "/var/run/docker.sock",
                 break
             buf += chunk
             text = _demux(buf)
-            chain = parse_chain(text)
-            # Complete once a line after the block is in: the block ends
-            # with the last numbered line, followed by LiteLLM's own output.
-            if chain and not text.rstrip().splitlines()[-1].lstrip()[:1].isdigit():
-                return chain
-        return parse_chain(_demux(buf))
+            chains = parse_chains(text)
+            # Complete once the last route's block is in and a line after
+            # it (LiteLLM's own output) has arrived.
+            last = text.rstrip().splitlines()[-1] if text.strip() else ""
+            if (all(r in chains for r in ROUTES) and not _CHAIN_LINE.match(last)
+                    and not _ROUTE_HEADER.search(last)):
+                return chains
+        return parse_chains(_demux(buf))
     finally:
         conn.close()
 
 
+def docker_chain(container: str, sock_path: str = "/var/run/docker.sock",
+                 max_bytes: int = 2 * 1024 * 1024) -> list[dict[str, Any]]:
+    """The `standard` chain printed at the container's current start."""
+    return docker_chains(container, sock_path, max_bytes).get(standard.ROUTE_NAME, [])
+
+
 def proxy_status(base_url: str, master_key: str, container: str, sock_path: str,
                  wait_seconds: float = 0) -> dict[str, Any]:
-    """Readiness (polled up to wait_seconds), model names, current chain."""
+    """Readiness (polled up to wait_seconds), model names, current chains
+    (`chain` is `standard`, kept for the page's older readers; `chains`
+    carries every generated route)."""
     deadline = time.time() + wait_seconds
     ready = False
     while True:
@@ -373,10 +398,11 @@ def proxy_status(base_url: str, master_key: str, container: str, sock_path: str,
         except (urllib.error.URLError, OSError, TimeoutError, ValueError, KeyError):
             models = []
     try:
-        chain = docker_chain(container, sock_path)
+        chains = docker_chains(container, sock_path)
     except OSError:
-        chain = []
-    return {"ready": ready, "models": models, "chain": chain}
+        chains = {}
+    return {"ready": ready, "models": models,
+            "chain": chains.get(standard.ROUTE_NAME, []), "chains": chains}
 
 
 # ─── application ────────────────────────────────────────────────────────────
