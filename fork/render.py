@@ -9,10 +9,11 @@ Drop-in for `python3 render-config.py` (same flags).
   1. Runs upstream's renderer on it, untouched.
   2. Appends the `standard` deployments to model_list -- every chat
      deployment that survived the provider filter, copied with a unique
-     `order` (fork/standard.py).
-  3. Pins `{"standard": []}` in router_settings.fallbacks, so the route
-     ends explicitly instead of drifting into the catch-all '*'.
-  4. Sets `router_settings.max_fallbacks` to the chain length: LiteLLM's
+     `order` (fork/standard.py) -- and the `tools` deployments: the same
+     chain narrowed to the tool-calling allowlist (fork/tools_route.py).
+  3. Pins `{"standard": []}` and `{"tools": []}` in router_settings.fallbacks,
+     so each route ends explicitly instead of drifting into the catch-all '*'.
+  4. Sets `router_settings.max_fallbacks` to the longest chain: LiteLLM's
      order-based fallback walks one order level per hop and stops at
      max_fallbacks (default 5), which would leave most of the chain untried.
 
@@ -36,7 +37,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from fork import standard  # noqa: E402
+from fork import standard, tools_route  # noqa: E402
 
 
 def _load_upstream_renderer():
@@ -85,10 +86,29 @@ def add_standard_route(lines: list[str], env: dict[str, str]) -> tuple[list[str]
     return lines[:end] + standard.render_blocks(chain) + ["\n"] + lines[end:], chain
 
 
-def pin_fallbacks(lines: list[str], chain_len: int) -> list[str]:
-    """Explicit empty chain for `standard` + max_fallbacks deep enough."""
-    if chain_len == 0:
+def add_tools_route(lines: list[str], env: dict[str, str]) -> tuple[list[str], list[dict]]:
+    """Appends the generated `tools` deployments and returns (lines, chain).
+
+    Built from the same parsed blocks as `standard` (the `standard` copies
+    carry the same backends, so they are de-duplicated away)."""
+    _, _, blocks = rc.parse_blocks(lines)
+    chain = tools_route.chain(blocks, env)
+    if not chain:
+        return lines, chain
+    end = _model_list_end(lines)
+    return lines[:end] + tools_route.render_blocks(chain) + ["\n"] + lines[end:], chain
+
+
+def pin_fallbacks(lines: list[str], chain_len: int,
+                  routes: tuple[str, ...] = (standard.ROUTE_NAME,)) -> list[str]:
+    """Explicit empty chain for each generated route + max_fallbacks deep enough.
+
+    `chain_len` is the longest chain; `routes` the names to close (only
+    routes that were actually rendered -- a fallback key that is not a
+    model_name would fail LiteLLM's config validation)."""
+    if chain_len == 0 or not routes:
         return lines
+    ours = re.compile(r'\s*-\s*\{"(' + "|".join(re.escape(r) for r in routes) + r')":')
     out: list[str] = []
     in_router = False
     for line in lines:
@@ -102,14 +122,22 @@ def pin_fallbacks(lines: list[str], chain_len: int) -> list[str]:
             continue  # ours is already in place
         if in_router and s == "fallbacks:":
             out.append(line)
-            out.append(f'    - {{"{standard.ROUTE_NAME}": []}}\n')
+            for route in routes:
+                out.append(f'    - {{"{route}": []}}\n')
             continue
-        if in_router and re.match(rf'\s*-\s*\{{"{re.escape(standard.ROUTE_NAME)}":', line):
+        if in_router and ours.match(line):
             continue  # ours is already in place
         if in_router and s and not line.startswith(" "):
             in_router = False
         out.append(line)
     return out
+
+
+def print_chain(route: str, chain: list[dict]) -> None:
+    """One block per route in the start-up log; fork/settings_ui.py parses it."""
+    print(f"'{route}' route: {len(chain)} deployment(s) in priority order")
+    for n, b in enumerate(chain, start=1):
+        print(f"  {n:>2}. {b['provider']:<13} {b['model_id']}")
 
 
 def render(template_path: Path, env_path: Path, output_path: Path,
@@ -126,13 +154,15 @@ def render(template_path: Path, env_path: Path, output_path: Path,
     env = rc.load_env(env_path)
     lines = output_path.read_text(encoding="utf-8").splitlines(keepends=True)
     lines, chain = add_standard_route(lines, env)
-    lines = pin_fallbacks(lines, len(chain))
+    lines, tools_chain = add_tools_route(lines, env)
+    routes = tuple(name for name, c in ((standard.ROUTE_NAME, chain),
+                                        (tools_route.ROUTE_NAME, tools_chain)) if c)
+    lines = pin_fallbacks(lines, max(len(chain), len(tools_chain)), routes)
     tmp = output_path.with_suffix(output_path.suffix + ".tmp")
     tmp.write_text("".join(lines), encoding="utf-8")
     os.replace(tmp, output_path)
-    print(f"'{standard.ROUTE_NAME}' route: {len(chain)} deployment(s) in priority order")
-    for n, b in enumerate(chain, start=1):
-        print(f"  {n:>2}. {b['provider']:<13} {b['model_id']}")
+    print_chain(standard.ROUTE_NAME, chain)
+    print_chain(tools_route.ROUTE_NAME, tools_chain)
     return 0
 
 
