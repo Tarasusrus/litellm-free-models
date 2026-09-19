@@ -63,6 +63,17 @@ class TestRequestBuilder(unittest.TestCase):
         self.assertFalse(req.get("stream", False))
         json.loads(json.dumps(req))
 
+    @given(st.text(min_size=1, max_size=40), city_st, st.text(min_size=1, max_size=12),
+           st.booleans())
+    def test_no_fallback_pins_the_request_to_the_addressed_deployment(self, model, city, nonce, flag):
+        req = smoke.build_request(model, city, nonce, no_fallback=flag)
+        self.assertEqual(req.get("fallbacks"), [] if flag else None)
+        self.assertNotIn("fallbacks", smoke.build_request(model, city, nonce))
+        # the follow-up inherits it: step two must not wander off either
+        _, _, call = smoke.check_tool_call(_good_message("c1", city, {}))
+        second = smoke.build_followup(req, _good_message("c1", city, {}), call)
+        self.assertEqual(second.get("fallbacks"), req.get("fallbacks"))
+
     @given(st.text(min_size=1, max_size=40), city_st, st.text(min_size=1, max_size=12))
     def test_prompt_names_the_city_and_the_nonce(self, model, city, nonce):
         req = smoke.build_request(model, city, nonce)

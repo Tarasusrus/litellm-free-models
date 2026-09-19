@@ -27,8 +27,9 @@ stdlib only. Examples:
 
 `--all-deployments` addresses each chat backend by its deployment id (the
 proxy accepts `model_info.id` as `model`), so shared model names cannot
-mask a backend that fails; an answer the catch-all fallback served from
-another backend is rejected. Attempts run round-robin over the targets
+mask a backend that fails, and with `fallbacks: []` so the backend's own
+error comes back instead of an answer from the catch-all `*` chain (an
+answer that still arrives from another backend is rejected). Attempts run round-robin over the targets
 with `--pace` seconds between rounds: the template caps most deployments
 at 2 rpm and one attempt is two requests, so one round per minute.
 
@@ -84,10 +85,14 @@ deployment_key = tools_route.verified_key
 split_deployment_key = tools_route.split_verified_key
 
 
-def build_request(model: str, city: str, nonce: str) -> dict:
+def build_request(model: str, city: str, nonce: str, no_fallback: bool = False) -> dict:
     """Step one: the question plus the single tool, uncached (the proxy
-    caches identical requests; the nonce keeps every attempt distinct)."""
-    return {
+    caches identical requests; the nonce keeps every attempt distinct).
+
+    `no_fallback` sends `fallbacks: []`, which LiteLLM honours per request:
+    the addressed deployment's own error comes back instead of an answer
+    from the catch-all `*` chain."""
+    req = {
         "model": model,
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
@@ -98,6 +103,9 @@ def build_request(model: str, city: str, nonce: str) -> dict:
         "temperature": 0,
         "cache": {"no-cache": True},
     }
+    if no_fallback:
+        req["fallbacks"] = []
+    return req
 
 
 def check_tool_call(message: dict) -> tuple[bool, str, dict | None]:
@@ -199,9 +207,9 @@ def _call(base_url: str, api_key: str, payload: dict, timeout: float):
 
 
 def run_attempt(base_url: str, api_key: str, model: str, city: str, nonce: str,
-                timeout: float) -> Attempt:
+                timeout: float, no_fallback: bool = False) -> Attempt:
     t0 = time.monotonic()
-    first = build_request(model, city, nonce)
+    first = build_request(model, city, nonce, no_fallback)
     message, headers, err = _call(base_url, api_key, first, timeout)
     model_id = headers.get("x-litellm-model-id", "")
     api_base = headers.get("x-litellm-model-api-base", "")
@@ -349,7 +357,8 @@ def main() -> int:
         for label, model in targets:
             addressed_id = model if model != label else ""
             nonce = uuid.uuid4().hex[:8]
-            a = run_attempt(base_url, api_key, model, CITIES[i % len(CITIES)], nonce, args.timeout)
+            a = run_attempt(base_url, api_key, model, CITIES[i % len(CITIES)], nonce, args.timeout,
+                            no_fallback=bool(addressed_id))
             a = reject_fallback(addressed_id, a)
             # Addressed by id, the verdict belongs to that deployment even
             # when a fallback answered; by name, to whoever served it.
