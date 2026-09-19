@@ -22,15 +22,19 @@ it.
 
 | Path | Role |
 |---|---|
-| `fork/render.py` | Drop-in for `render-config.py` (same flags). Prepends `fork/models.yaml` to a temporary copy of the template, runs upstream's renderer **unchanged** on it, then post-processes the output: appends the `standard` deployments, pins `{"standard": []}` in `fallbacks`, sets `router_settings.max_fallbacks`. |
+| `fork/render.py` | Drop-in for `render-config.py` (same flags). Prepends `fork/models.yaml` to a temporary copy of the template, runs upstream's renderer **unchanged** on it, then post-processes the output: appends the `standard` and `tools` deployments, pins `{"standard": []}` and `{"tools": []}` in `fallbacks`, sets `router_settings.max_fallbacks` to the longer chain. Prints both chains at start-up; `fork/settings_ui.py` reads them from the container log. |
 | `fork/models.yaml` | Deployments upstream's catalogue does not carry (today: Gemini flash-lite tier), in upstream's block format so the same filter and validation apply. Placed first in `model_list`, so they lead their provider in the `standard` chain. Tests reject entries that duplicate an upstream backend or reuse a non-chat alias. |
 | `fork/discovery.py` | Hooks for upstream's discovery: first-party model patterns per provider (`FIRST_PARTY_MODELS`) and the template-plus-fragment text the stale check parses. |
 | `fork/standard.py` | Provider priority (`PROVIDER_PRIORITY`), the chain builder (`chain`) and the YAML emitter (`render_blocks`). |
+| `fork/tools_route.py` | The `tools` route (§5): the allowlist `TOOL_CALLING_VERIFIED` (`model @ host` → date of the live run) and `chain`, which is `standard.chain` filtered by it. |
+| `tools/smoke-tool-calling.py` | Live two-step tool-calling smoke through the proxy; its 5/5 passes are what the allowlist records. `--all-deployments` addresses every chat backend by deployment id, round-robin, one round per minute (the template's 2 rpm). |
+| `tools/smoke-json-schema.py` | Live strict-`json_schema` smoke; `JSON_SCHEMA_VERIFIED` is a report, not a filter (§3). |
 | `fork/docker-entrypoint.sh` | Proxy entrypoint for compose: export the provider keys, `REDIS_PASSWORD` and a computed `DATABASE_URL` from `.env` (`fork/env_exports.py`), render inside the container, then start LiteLLM. Read from the file at every start, so a changed key needs `docker compose restart litellm-proxy`, not a recreate — and so the passwords `env-init` generates on a first run reach the proxy even though compose already interpolated its own, still-empty `${POSTGRES_PASSWORD}`/`${REDIS_PASSWORD}` before that generation ran. |
 | `fork/ensure_secrets.py` | The `env-init` compose service: generates `POSTGRES_PASSWORD`, `REDIS_PASSWORD` and `LITELLM_MASTER_KEY` into `.env` when missing, empty or still the `.env.example` placeholder (never when already real -- regenerating `POSTGRES_PASSWORD` would lock the proxy out of the existing volume), and copies the two passwords into `secrets-data` as plain files, because `postgres`'s and `redis`'s own entrypoints need a real value at their own container start, before `fork/docker-entrypoint.sh` gets a turn. |
 | `fork/env_exports.py` | Prints `export VAR=…` for the provider variables in `.env`, plus `REDIS_PASSWORD` and a computed `DATABASE_URL` when a `POSTGRES_PASSWORD` is present -- config.template.yaml resolves both through `os.environ/…`. The master key needs no export: `fork/render.py` substitutes `{{LITELLM_MASTER_KEY}}` straight from `.env`. |
-| `fork/settings_ui.py`, `fork/settings_ui.html` | The `settings-ui` compose service: provider keys in the browser. Lists `providers_config.PROVIDERS` in chain order, checks a key with `find-shared-models.py`'s `fetch_*`, writes `.env` atomically (temp + rename, 0600, only provider variables), restarts the proxy through the Docker Engine API and reads the chain from the container log. Console links and hints come from `onboard.PROVIDER_KEYS`; nothing is typed twice. |
+| `fork/settings_ui.py`, `fork/settings_ui.html` | The `settings-ui` compose service: provider keys in the browser. Lists `providers_config.PROVIDERS` in chain order, checks a key with `find-shared-models.py`'s `fetch_*`, writes `.env` atomically (temp + rename, 0600, only provider variables), restarts the proxy through the Docker Engine API and reads the `standard` and `tools` chains from the container log. Console links and hints come from `onboard.PROVIDER_KEYS`; nothing is typed twice. |
 | `tests/test_standard_route.py` | Property tests for the chain and the rendered config. |
+| `tests/test_tools_route.py`, `tests/test_smoke_tool_calling.py` | Property tests for the `tools` route (subset of `standard`, same order, nothing outside the allowlist, closed and deep enough in the rendered config) and for the smoke's verdict (prose, another function, non-JSON arguments, a missing city, a fallback's answer all fail). |
 | `tests/test_fork_discovery.py` | Property tests for the discovery hooks: Gemini free at Google, denied at aggregators; fork deployments enter the stale check. |
 | `tests/test_settings_ui.py`, `tests/test_env_exports.py`, `tests/test_ensure_secrets.py`, `tests/test_fork_renderer_entrypoints.py` | Property tests for the settings page (`.env` atomicity and ownership, masking, provider list, mocked key check, HTTP API, live-value vs. stored-key checks), the key/password export and `DATABASE_URL` assembly, secret generation and idempotence, and the render entry points. |
 | `docs/USAGE.md`, `docs/run.md`, `docs/adr/` | Fork documentation. |
@@ -118,6 +122,37 @@ make test && make lint
 After a merge, `git diff upstream/main -- config.template.yaml render-config.py providers_config.py`
 must be empty. `test_every_provider_has_a_documented_priority` tells when a
 new provider needs a slot in `PROVIDER_PRIORITY` and in the table above.
+
+### 5. The `tools` route
+
+- Purpose: agents with MCP servers (or any function-calling loop). With
+  `drop_params: true` a backend that does not understand `tools` gets the
+  request without them and answers with prose; the loop breaks without an
+  error. `standard` keeps such backends on purpose (§3), so agents need a
+  name that excludes them.
+- Same mechanics as `standard`: generated at render time from the keyed
+  chat deployments, same provider order, unique `order`, closed with
+  `{"tools": []}`, never rendered into the template. The only difference
+  is the filter: a deployment enters `tools` only if its `model @ host`
+  key is in `TOOL_CALLING_VERIFIED` (`fork/tools_route.py`). Invariants,
+  property-tested in `tests/test_tools_route.py`: `tools` ⊆ `standard` by
+  deployment, in `standard`'s order, nothing outside the allowlist, empty
+  allowlist → no route, full allowlist → the whole `standard` chain.
+- The allowlist is filled only from live runs of
+  `tools/smoke-tool-calling.py` (`--all-deployments --n 5`): a deployment
+  must complete both steps (a `tool_calls` for the one offered function
+  with a JSON object holding the `city`, then a final text after the
+  `role: tool` reply) on every attempt, addressed by its deployment id so
+  that the catch-all fallback cannot answer for it. The value is the date
+  of the run. A new provider key therefore joins `standard` on the next
+  start but `tools` only after someone has run the smoke and committed the
+  entry — a deliberate manual step: the route's promise is "verified", not
+  "probably works".
+- `max_fallbacks` is the longer of the two chains; both routes are pinned
+  in `fallbacks` only when they were rendered (a fallback key without a
+  deployment fails LiteLLM's config validation), so `tools` is absent from
+  `/v1/models` until a verified deployment has a key.
+- The settings page shows both chains after Apply.
 
 ## Consequences
 

@@ -90,10 +90,10 @@ Response headers tell which deployment served the request:
 | `x-litellm-model-name` | LiteLLM model id of the backend, e.g. `gemini/gemini-3.5-flash-lite`, `openai/codestral-latest` |
 | `x-litellm-model-api-base` | provider endpoint that answered (tells the host apart for `openai/*` ids) |
 | `x-litellm-model-id` | stable id of the deployment; `GET /model/info` maps ids to `litellm_params` |
-| `x-litellm-model-group` | the model name you asked for (`standard`) |
+| `x-litellm-model-group` | the model name you asked for (`standard`, `tools`, …) |
 | `x-litellm-attempted-fallbacks` | how many deployments failed before this one (absent when the first one answered) |
 
-The response body's `model` field is the requested name (`standard`), not the backend.
+The response body's `model` field is the requested name (`standard`, `tools`), not the backend.
 
 ## Structured output (`response_format`)
 
@@ -129,6 +129,95 @@ python3 tools/smoke-json-schema.py --model standard --n 3
 
 If your client needs guaranteed schema compliance on every call, ask for a
 verified model by name (e.g. `gemini-3.5-flash-lite`) instead of `standard`.
+
+## Tool calling / MCP agents (`model: "tools"`)
+
+`standard` does not guarantee tool calling. The proxy runs with
+`drop_params: true`: a backend that does not understand `tools` receives the
+request *without* them and answers with prose — no error, the agent loop
+just stops. `model: "tools"` is the same chain as `standard`, in the same
+provider order, narrowed to the deployments that completed a live two-step
+tool call on every attempt (`TOOL_CALLING_VERIFIED` in
+[`fork/tools_route.py`](../fork/tools_route.py), keyed by model + host, with
+the date of the run). A new provider key puts its models into `standard` on
+the next start but into `tools` only after the smoke has seen them pass.
+
+Send `tools`/`tool_calls` in the usual OpenAI format. One tool, two steps:
+
+```python
+import json
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:4444/v1", api_key="<LITELLM_MASTER_KEY>")
+
+tools = [{
+    "type": "function",
+    "function": {
+        "name": "get_weather",
+        "description": "Current weather for a city.",
+        "parameters": {
+            "type": "object",
+            "properties": {"city": {"type": "string"}},
+            "required": ["city"],
+        },
+    },
+}]
+
+def get_weather(city: str) -> dict:
+    return {"city": city, "temperature_c": 21, "sky": "clear"}  # your implementation
+
+messages = [{"role": "user", "content": "What is the weather in Paris right now?"}]
+
+# Step 1: the model asks for the tool.
+first = client.chat.completions.create(model="tools", messages=messages, tools=tools)
+call = first.choices[0].message.tool_calls[0]
+args = json.loads(call.function.arguments)
+
+# Step 2: answer the call by id, the model writes the final text.
+messages += [first.choices[0].message,
+             {"role": "tool", "tool_call_id": call.id, "content": json.dumps(get_weather(**args))}]
+final = client.chat.completions.create(model="tools", messages=messages, tools=tools)
+print(final.choices[0].message.content)
+```
+
+`x-litellm-model-name` in the response headers says which backend served
+each step ([Who answered](#who-answered)). Keep the tool definitions in the
+second request too: the two steps are independent requests, and a backend
+needs the definitions to read the `role: tool` message.
+
+**With an MCP server.** An MCP client lists the server's tools and hands
+them to the model in the same format; the loop above is the whole
+integration. With the official `mcp` package:
+
+```python
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
+
+async with stdio_client(StdioServerParameters(command="npx", args=["-y", "@modelcontextprotocol/server-filesystem", "."])) as (r, w):
+    async with ClientSession(r, w) as mcp:
+        await mcp.initialize()
+        tools = [{"type": "function",
+                  "function": {"name": t.name, "description": t.description or "",
+                               "parameters": t.inputSchema}}
+                 for t in (await mcp.list_tools()).tools]
+        reply = client.chat.completions.create(model="tools", messages=messages, tools=tools)
+        for call in reply.choices[0].message.tool_calls or []:
+            result = await mcp.call_tool(call.function.name, json.loads(call.function.arguments))
+            messages += [reply.choices[0].message,
+                         {"role": "tool", "tool_call_id": call.id,
+                          "content": "".join(c.text for c in result.content if hasattr(c, "text"))}]
+        # ... then call the model again with the tool results, as in step 2
+```
+
+Re-check the route, or a single backend, any time:
+
+```bash
+python3 tools/smoke-tool-calling.py --model tools --n 5
+python3 tools/smoke-tool-calling.py --all-deployments --n 5   # candidates for the allowlist
+```
+
+`tools` is empty (and absent from `/v1/models`) until at least one verified
+deployment has a key in `.env`; today that means a Gemini or Groq key.
 
 ## Limits
 
