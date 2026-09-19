@@ -30,8 +30,19 @@ KEY_SEP = " @ "
 #
 #   python3 tools/smoke-tool-calling.py --all-deployments --n 5
 TOOL_CALLING_VERIFIED: dict[str, str] = {
+    # Google AI Studio (free tier), 5/5 addressed by deployment id
     "gemini/gemini-3.5-flash-lite": "2026-09-19",
+    "gemini/gemini-3.1-flash-lite": "2026-09-19",
+    "gemini/gemini-flash-lite-latest": "2026-09-19",
+    # Groq, 5/5 addressed by deployment id
     "groq/openai/gpt-oss-120b": "2026-09-19",
+    "groq/openai/gpt-oss-20b": "2026-09-19",
+    "groq/openai/gpt-oss-safeguard-20b": "2026-09-19",
+    # Seen failing the same run: gemma-4-26b (4/5, one Gemini 500),
+    # gemma-4-31b (timeouts), lyria (quota), groq/qwen3.6-27b (404 at
+    # Groq), LLM7 codestral (rate limit on step 2), LLM7 minimax (502s,
+    # one second tool call instead of text), LLM7 mistral-nemo ("does
+    # not support tools"). OVHcloud and the rest of LLM7: no usable key.
 }
 
 

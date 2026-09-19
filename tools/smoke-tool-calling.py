@@ -23,9 +23,10 @@ stdlib only. Examples:
 
   python3 tools/smoke-tool-calling.py --model tools --n 5
   python3 tools/smoke-tool-calling.py --all-deployments --n 5
+  python3 tools/smoke-tool-calling.py --deployment "groq/openai/gpt-oss-20b" --n 3
   python3 tools/smoke-tool-calling.py --model gpt-oss-120b --base-url http://host:4444
 
-`--all-deployments` addresses each chat backend by its deployment id (the
+`--deployment` and `--all-deployments` address a chat backend by its deployment id (the
 proxy accepts `model_info.id` as `model`), so shared model names cannot
 mask a backend that fails, and with `fallbacks: []` so the backend's own
 error comes back instead of an answer from the catch-all `*` chain (an
@@ -175,6 +176,7 @@ class Attempt:
     group: str = ""
     deployment: str = ""
     final_text: str = ""
+    served_model2: str = ""  # backend of step two when it differs from step one
 
 
 def _post_json(url: str, api_key: str, payload: dict, timeout: float):
@@ -226,14 +228,17 @@ def run_attempt(base_url: str, api_key: str, model: str, city: str, nonce: str,
     if err:
         return Attempt(False, "step 2: " + err, model_id, api_base, _ms(t0), served, group)
     served2 = headers2.get("x-litellm-model-name", "")
-    if served2 and served2 != served:
+    if no_fallback and served2 and served2 != served:
+        # Addressed by id, both steps must come from that backend. Through
+        # a route, a different verified backend on step two is what the
+        # route promises; it is reported, not rejected.
         return Attempt(False, f"step 2 served by another backend: {served2}", model_id, api_base,
                        _ms(t0), served, group)
     ok, reason = check_final(message2)
     if not ok:
         return Attempt(False, "step 2: " + reason, model_id, api_base, _ms(t0), served, group)
     return Attempt(True, "", model_id, api_base, _ms(t0), served, group,
-                   final_text=message2["content"].strip())
+                   final_text=message2["content"].strip(), served_model2=served2)
 
 
 def reject_fallback(expected_id: str, a: Attempt) -> Attempt:
@@ -323,6 +328,9 @@ def main() -> int:
     ap.add_argument("--base-url", default=os.environ.get("LITELLM_BASE_URL", "http://localhost:4444"))
     ap.add_argument("--api-key", default=None, help="default: LITELLM_MASTER_KEY from env or .env")
     ap.add_argument("--model", action="append", default=[], help="model_name to test (repeatable)")
+    ap.add_argument("--deployment", action="append", default=[], metavar="KEY",
+                    help="one backend by its allowlist key (`model` or `model @ host`), "
+                         "addressed by deployment id (repeatable)")
     ap.add_argument("--all-deployments", action="store_true",
                     help="test every chat backend the proxy lists, addressed by deployment id")
     ap.add_argument("--n", type=int, default=5, help="attempts per model (default 5)")
@@ -344,11 +352,18 @@ def main() -> int:
         return 2
     by_id = deployment_index(info)
     targets: list[tuple[str, str]] = [(m, m) for m in args.model]  # (label, model to send)
+    deployments = dict(unique_deployments(info))
+    for key in args.deployment:
+        if key not in deployments:
+            print(f"ERROR: no chat deployment {key!r}; known: {', '.join(deployments)}",
+                  file=sys.stderr)
+            return 2
+        targets.append((key, deployments[key]))
     if args.all_deployments:
-        targets += [(key, mid) for key, mid in unique_deployments(info)
+        targets += [(key, mid) for key, mid in deployments.items()
                     if key not in {t[0] for t in targets}]
     if not targets:
-        ap.error("give --model at least once or --all-deployments")
+        ap.error("give --model or --deployment at least once, or --all-deployments")
 
     results: dict[str, list[Attempt]] = {label: [] for label, _ in targets}
     for i in range(args.n):
@@ -365,7 +380,8 @@ def main() -> int:
             a.deployment = label if addressed_id else by_id.get(a.model_id, "")
             results[label].append(a)
             mark = "OK  " if a.ok else "FAIL"
-            print(f"  {mark} {a.ms:>6}ms {label}  x-litellm-model-name={a.served_model or '-'}"
+            hop = f" -> {a.served_model2}" if a.served_model2 and a.served_model2 != a.served_model else ""
+            print(f"  {mark} {a.ms:>6}ms {label}  x-litellm-model-name={a.served_model or '-'}{hop}"
                   + (f"\n       -> {a.final_text[:100]!r}" if a.ok else f"\n       {a.reason[:160]}"))
         if i + 1 < args.n:
             wait = args.pace - (time.monotonic() - round_start)
@@ -376,7 +392,7 @@ def main() -> int:
     print("Summary:")
     for label, attempts in results.items():
         ok = sum(1 for a in attempts if a.ok)
-        served = sorted({a.served_model for a in attempts if a.ok and a.served_model})
+        served = sorted({m for a in attempts if a.ok for m in (a.served_model, a.served_model2) if m})
         print(f"  {'PASS' if ok == len(attempts) else 'FAIL'} {label}: {ok}/{len(attempts)}"
               + (f"  served by: {', '.join(served)}" if served else ""))
     print()
