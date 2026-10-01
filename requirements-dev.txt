@@ -2,3 +2,4 @@
 ruff==0.6.9
 pre-commit==3.8.0
 hypothesis==6.163.0
+pyyaml  # tests/test_render_config.py parses the rendered config
