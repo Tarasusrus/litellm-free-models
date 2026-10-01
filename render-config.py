@@ -9,7 +9,7 @@ Renders config.template.yaml into config.yaml.
      `# BEGIN REDIS ...` / `# END REDIS ...`) if REDIS_HOST is missing/empty
      or --no-redis was passed.
   3b. Removes the Langfuse block (`# BEGIN LANGFUSE` / `# END LANGFUSE`)
-     unless both LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY are set.
+     unless LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY and LANGFUSE_HOST are set.
   4. If OPENROUTER_API_KEY is set, appends `openrouter-free` to every
      fallback chain and to the catch-all `*`.
   5. Removes fallback entries AND chain targets that point to model_names
@@ -355,10 +355,17 @@ def strip_marked_blocks(lines: list[str], tag: str, active: bool) -> list[str]:
     return new_lines
 
 
+LANGFUSE_VARS = ("LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "LANGFUSE_HOST")
+
+
 def langfuse_active(env: dict) -> bool:
-    """Fork: tracing to Langfuse needs both keys; with one of them missing
-    the callback would fail on every request instead of staying off."""
-    return bool(env.get("LANGFUSE_PUBLIC_KEY")) and bool(env.get("LANGFUSE_SECRET_KEY"))
+    """Fork: tracing to Langfuse needs both keys AND an explicit host.
+
+    Without LANGFUSE_HOST the SDK falls back to https://cloud.langfuse.com
+    and POSTs every prompt and completion there before the cloud rejects the
+    self-hosted keys; with an empty one it builds `http://` and drops every
+    trace silently. Either way the callback stays off."""
+    return all(env.get(var) for var in LANGFUSE_VARS)
 
 
 def strip_redis_blocks(lines: list[str], redis_active: bool) -> list[str]:

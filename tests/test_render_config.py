@@ -472,14 +472,30 @@ class TestLangfuseBlock(unittest.TestCase):
         out = rc.strip_marked_blocks(self.LINES, "LANGFUSE", False)
         self.assertEqual(out, ["litellm_settings:\n", "  num_retries: 1\n"])
 
-    def test_both_keys_are_needed(self):
-        self.assertTrue(rc.langfuse_active({"LANGFUSE_PUBLIC_KEY": "pk", "LANGFUSE_SECRET_KEY": "sk"}))
-        self.assertFalse(rc.langfuse_active({"LANGFUSE_PUBLIC_KEY": "pk"}))
-        self.assertFalse(rc.langfuse_active({"LANGFUSE_SECRET_KEY": "sk"}))
-        self.assertFalse(rc.langfuse_active({}))
+    FULL = {"LANGFUSE_PUBLIC_KEY": "pk", "LANGFUSE_SECRET_KEY": "sk", "LANGFUSE_HOST": "http://lf:3000"}
 
-    def test_the_template_carries_the_block_in_litellm_settings(self):
-        text = (Path(__file__).resolve().parent.parent / "config.template.yaml").read_text(encoding="utf-8")
-        settings = text[text.index("litellm_settings:"):]
-        self.assertIn("# BEGIN LANGFUSE", settings)
-        self.assertIn('failure_callback: ["langfuse"]', settings)
+    def test_both_keys_and_an_explicit_host_are_needed(self):
+        """Without a host the SDK would POST prompts to cloud.langfuse.com."""
+        self.assertTrue(rc.langfuse_active(self.FULL))
+        for missing in self.FULL:
+            env = {k: v for k, v in self.FULL.items() if k != missing}
+            self.assertFalse(rc.langfuse_active(env), missing)
+            self.assertFalse(rc.langfuse_active({**env, missing: ""}), missing)
+
+    def _rendered_settings(self, env_text):
+        import yaml
+
+        root = Path(__file__).resolve().parent.parent
+        with tempfile.TemporaryDirectory() as d:
+            env_path, out = Path(d) / ".env", Path(d) / "out.yaml"
+            env_path.write_text(env_text, encoding="utf-8")
+            self.assertEqual(rc.render(root / "config.template.yaml", env_path, out), 0)
+            return yaml.safe_load(out.read_text(encoding="utf-8"))["litellm_settings"]
+
+    def test_the_real_template_renders_the_callbacks_only_with_the_full_langfuse_setup(self):
+        on = self._rendered_settings("".join(f"{k}={v}\n" for k, v in self.FULL.items()))
+        self.assertEqual(on.get("success_callback"), ["langfuse"])
+        self.assertEqual(on.get("failure_callback"), ["langfuse"])
+        off = self._rendered_settings("LANGFUSE_PUBLIC_KEY=pk\nLANGFUSE_SECRET_KEY=sk\n")
+        self.assertNotIn("success_callback", off)
+        self.assertNotIn("failure_callback", off)

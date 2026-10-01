@@ -67,6 +67,12 @@ def exports(env: dict[str, str]) -> str:
     lines = [f"export {var}={shlex.quote(env[var])}" for var in PROVIDER_VARS if var in env]
     if env.get("REDIS_PASSWORD"):
         lines.append(f"export REDIS_PASSWORD={shlex.quote(env['REDIS_PASSWORD'])}")
+    # Langfuse: render-config.py turns the callback on from the live .env, so
+    # the process must see the same keys -- a restart (settings UI, compose
+    # restart) keeps the environment compose captured at creation.
+    for var in ("LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "LANGFUSE_HOST"):
+        if env.get(var):
+            lines.append(f"export {var}={shlex.quote(env[var])}")
     url = database_url(env)
     if url:
         lines.append(f"export DATABASE_URL={shlex.quote(url)}")

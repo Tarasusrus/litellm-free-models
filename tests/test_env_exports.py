@@ -118,3 +118,15 @@ class TestRedisPasswordAndDatabaseUrl(unittest.TestCase):
         script = env_exports.exports({"POSTGRES_PASSWORD": password})
         self.assertIn("@postgres:5432/litellm", script)
         self.assertIn(password, script)
+
+
+class TestLangfuseExports(unittest.TestCase):
+    """A restart keeps compose's creation-time environment; the callback is
+    switched on from the live .env, so the keys must come from there too."""
+
+    def test_langfuse_vars_are_exported_from_the_live_env(self):
+        for var in ("LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "LANGFUSE_HOST"):
+            self.assertEqual(_shell_sees(f"{var}=v-1\n", var), "v-1")
+
+    def test_no_langfuse_line_without_them(self):
+        self.assertNotIn("LANGFUSE", env_exports.exports({}))
