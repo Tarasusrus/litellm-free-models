@@ -109,6 +109,12 @@ services:
       - OPENCODE_ZEN_API_KEY=${OPENCODE_ZEN_API_KEY}
       - LLM7IO_API_KEY=${LLM7IO_API_KEY}
       - HF_TOKEN=${HF_TOKEN}
+      # Fork: Langfuse tracing (render-config.py keeps the callback only
+      # when both keys are set). A Langfuse on the same host is reached
+      # as LANGFUSE_HOST=http://host.docker.internal:<port>.
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
+      - LANGFUSE_HOST=${LANGFUSE_HOST:-}
       # PostgreSQL Database URL for LiteLLM (key management, spend tracking, etc.)
       # Fork: no ${POSTGRES_PASSWORD:?...} here -- compose interpolates this
       # once, before env-init has generated it on a first run. Empty here is

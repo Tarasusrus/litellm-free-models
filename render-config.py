@@ -8,6 +8,8 @@ Renders config.template.yaml into config.yaml.
   3. Removes the Redis blocks (cache + router tracking, marked with
      `# BEGIN REDIS ...` / `# END REDIS ...`) if REDIS_HOST is missing/empty
      or --no-redis was passed.
+  3b. Removes the Langfuse block (`# BEGIN LANGFUSE` / `# END LANGFUSE`)
+     unless both LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY are set.
   4. If OPENROUTER_API_KEY is set, appends `openrouter-free` to every
      fallback chain and to the catch-all `*`.
   5. Removes fallback entries AND chain targets that point to model_names
@@ -334,6 +336,31 @@ def insert_retry_policy(lines: list[str], model_names: list[str]) -> list[str]:
     return lines[:start] + build_retry_policy_lines(model_names) + lines[end + 1:]
 
 
+def strip_marked_blocks(lines: list[str], tag: str, active: bool) -> list[str]:
+    """Blocks marked `# BEGIN <tag>` / `# END <tag>`: with `active` only the
+    marker lines go, without it the content goes too."""
+    new_lines: list[str] = []
+    in_block = False
+    for line in lines:
+        s = line.strip()
+        if s.startswith(f"# BEGIN {tag}"):
+            in_block = True
+            continue
+        if s.startswith(f"# END {tag}"):
+            in_block = False
+            continue
+        if in_block and not active:
+            continue
+        new_lines.append(line)
+    return new_lines
+
+
+def langfuse_active(env: dict) -> bool:
+    """Fork: tracing to Langfuse needs both keys; with one of them missing
+    the callback would fail on every request instead of staying off."""
+    return bool(env.get("LANGFUSE_PUBLIC_KEY")) and bool(env.get("LANGFUSE_SECRET_KEY"))
+
+
 def strip_redis_blocks(lines: list[str], redis_active: bool) -> list[str]:
     """
     Processes the blocks marked with `# BEGIN REDIS ...` / `# END REDIS ...`
@@ -531,6 +558,9 @@ def render(
     # 1b) Conditionally strip the Redis blocks (cache + router tracking)
     redis_active = bool(env.get("REDIS_HOST")) and not no_redis
     lines = strip_redis_blocks(lines, redis_active)
+    lines = strip_marked_blocks(lines, "LANGFUSE", langfuse_active(env))
+    if langfuse_active(env):
+        print("LANGFUSE keys set -> success/failure traces go to Langfuse.")
     if redis_active:
         print("REDIS_HOST set -> Redis cache + router tracking active.")
     else:

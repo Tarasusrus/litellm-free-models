@@ -449,3 +449,37 @@ class TestSingleDeploymentRetryPolicy(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestLangfuseBlock(unittest.TestCase):
+    """Fork: Langfuse callbacks only when both keys are set."""
+
+    LINES = [
+        "litellm_settings:\n",
+        "  # BEGIN LANGFUSE (x)\n",
+        '  success_callback: ["langfuse"]\n',
+        '  failure_callback: ["langfuse"]\n',
+        "  # END LANGFUSE\n",
+        "  num_retries: 1\n",
+    ]
+
+    def test_active_keeps_callbacks_and_drops_markers(self):
+        out = rc.strip_marked_blocks(self.LINES, "LANGFUSE", True)
+        self.assertIn('  failure_callback: ["langfuse"]\n', out)
+        self.assertFalse(any("BEGIN LANGFUSE" in line or "END LANGFUSE" in line for line in out))
+
+    def test_inactive_drops_the_whole_block(self):
+        out = rc.strip_marked_blocks(self.LINES, "LANGFUSE", False)
+        self.assertEqual(out, ["litellm_settings:\n", "  num_retries: 1\n"])
+
+    def test_both_keys_are_needed(self):
+        self.assertTrue(rc.langfuse_active({"LANGFUSE_PUBLIC_KEY": "pk", "LANGFUSE_SECRET_KEY": "sk"}))
+        self.assertFalse(rc.langfuse_active({"LANGFUSE_PUBLIC_KEY": "pk"}))
+        self.assertFalse(rc.langfuse_active({"LANGFUSE_SECRET_KEY": "sk"}))
+        self.assertFalse(rc.langfuse_active({}))
+
+    def test_the_template_carries_the_block_in_litellm_settings(self):
+        text = (Path(__file__).resolve().parent.parent / "config.template.yaml").read_text(encoding="utf-8")
+        settings = text[text.index("litellm_settings:"):]
+        self.assertIn("# BEGIN LANGFUSE", settings)
+        self.assertIn('failure_callback: ["langfuse"]', settings)

@@ -2120,6 +2120,15 @@ litellm_settings:
   request_timeout: 30
   num_retries: 1
 
+  # BEGIN LANGFUSE (removed by render-config.py unless LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY are set)
+  # Fork: one trace per call -- which deployment answered, which ones were
+  # tried before it and why they failed (429, 400, timeout). The failure
+  # callback is the point: a request that ends in an error is exactly the one
+  # nobody can explain from the proxy log. Host: LANGFUSE_HOST.
+  success_callback: ["langfuse"]
+  failure_callback: ["langfuse"]
+  # END LANGFUSE
+
   # BEGIN REDIS CACHE
   # ─── Redis Cache ──────────────────────────────────────────────────────────
   # Shared cache between master + all slaves. Reduces latency and rate-limit
