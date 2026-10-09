@@ -84,9 +84,9 @@ marked `# Fork:`; on a sync, keep ours.
   |---|---|---|
   | 1 | Google AI Studio (Gemini) | strong models, honours `json_schema`; 500 requests/day per model |
   | 2 | Mistral | ~1 request/s, ~1B tokens/month on the free tier |
-  | 3 | NVIDIA NIM | ~40 rpm, no published daily cap |
-  | 4 | Groq | fastest answers, small daily budget |
-  | 5 | OpenRouter (free models) | widest catalogue behind one key; 50 requests/day without credits |
+  | 3 | Groq | fastest answers, small daily budget |
+  | 4 | OpenRouter (free models) | widest catalogue behind one key; 50 requests/day without credits |
+  | 5 | NVIDIA NIM | ~40 rpm, no published daily cap; slow (success ~10 s, busy models hang to the deployment timeout) |
   | 6–13 | Cerebras, HuggingFace, Cohere, Cloudflare, OpenCode Zen, Poolside, Hetzner, Z.AI | keyed providers, by free-tier request budget (`rpm` in `providers_config.py`), ties alphabetical |
   | 14 | ElevenLabs | no chat models; listed so the set stays complete |
   | 15 | LLM7.io | anonymous tier, 10 rpm shared by everyone |
@@ -96,6 +96,16 @@ marked `# Fork:`; on a sync, keep ours.
   Reordered 2026-10-09: Gemini's daily cap ran out by morning and the
   small daily budgets of Groq and OpenRouter were next, so job-hunt stalled
   for hours; Mistral and NVIDIA carry far more per day.
+  Superseded the same day for NVIDIA: it moved back behind Groq and
+  OpenRouter. Once Gemini's cap ran out NVIDIA served nearly every request;
+  a success took ~10 s (p90 ~19 s) and a busy model hung until the 20–30 s
+  deployment timeout, so job-hunt's resume-match (one judge call per pair)
+  missed its 30-minute deadline. Rule now: fast budgets first, slow unlimited
+  capacity after them. Accepted cost: when Groq's and OpenRouter's small
+  daily budgets are spent too, a request pays their fast 429s (each cooled
+  down for 60 s) before NVIDIA — seconds, not the half-minute hangs. Open: a
+  shorter timeout for NVIDIA deployments would bound its hang wherever it
+  sits; not done yet because ~10% of its successes take longer than 15 s.
 
   Deployments in `fork/standard.py` `EXCLUDED` (`model @ host` -> date and
   evidence) never enter `standard` or `tools`: retired, paid only, not in

@@ -26,9 +26,14 @@ ROUTE_NAME = "standard"
 PROVIDER_PRIORITY: tuple[str, ...] = (
     "google-ai",      # Gemini: strongest json_schema, but 500 requests/day per model
     "mistral",        # ~1 request/s and ~1B tokens/month on the free tier
-    "nvidia",         # ~40 rpm, no published daily cap
     "groq",           # fast, small daily budget
     "openrouter",     # many free models behind one key, 50 requests/day without credits
+    # NVIDIA after the fast ones (2026-10-09): ~40 rpm and no daily cap, but a
+    # success takes ~10 s (p90 ~19 s) and a busy model hangs until the 20-30 s
+    # deployment timeout. Placed right after Mistral it served almost every
+    # request once Gemini's daily quota ran out, and job-hunt's resume-match
+    # (one judge call per pair) missed its 30-minute deadline.
+    "nvidia",         # ~40 rpm, no published daily cap, slow
     "cerebras",       # rpm 30
     "huggingface",    # rpm 30
     "cohere",         # rpm 20

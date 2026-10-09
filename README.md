@@ -20,7 +20,7 @@ What the fork adds:
 
 - **`standard` route** — every chat deployment you have a key for, behind
   one model name, tried in a fixed provider order (Gemini → Mistral →
-  NVIDIA → Groq → OpenRouter → … → anonymous tiers last). A new key in
+  Groq → OpenRouter → NVIDIA → … → anonymous tiers last). A new key in
   `.env` joins the chain on the next start; nothing to edit by hand.
   Deployments a live check found dead for good (`fork/standard.py`
   `EXCLUDED`, candidates from `tools/find-dead-deployments.py`) stay out.

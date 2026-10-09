@@ -266,6 +266,21 @@ class TestRenderedStandardRoute(unittest.TestCase):
         self.assertNotIn("vacancy-parse", text)
 
 
+class TestProviderOrderDecisions(unittest.TestCase):
+    """Operator decisions about the head of the chain, pinned so a sync or an
+    edit cannot silently undo them (ADR-0001, 2026-10-09)."""
+
+    def test_slow_nvidia_comes_after_the_fast_budgets(self):
+        rank = {p: i for i, p in enumerate(standard.PROVIDER_PRIORITY)}
+        # NVIDIA right after Mistral made job-hunt's resume-match miss its
+        # 30-minute deadline once Gemini's daily cap ran out.
+        self.assertGreater(rank["nvidia"], rank["groq"])
+        self.assertGreater(rank["nvidia"], rank["openrouter"])
+
+    def test_gemini_then_mistral_lead(self):
+        self.assertEqual(standard.PROVIDER_PRIORITY[:2], ("google-ai", "mistral"))
+
+
 class TestExcludedList(unittest.TestCase):
     """fork/standard.py EXCLUDED: hand-kept, so it can go stale or carry a typo."""
 
