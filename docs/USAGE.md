@@ -17,8 +17,8 @@ agent that has to produce working code right away.
 
 `model: "standard"` is the route for "any free model that answers". Behind
 it are all chat deployments of every provider that has a key in `.env`,
-tried in a fixed priority order (Gemini → Mistral → NVIDIA → Groq →
-OpenRouter → Cerebras → HuggingFace → Cohere → Cloudflare → OpenCode Zen →
+tried in a fixed priority order (Gemini → Mistral → Groq → OpenRouter →
+NVIDIA → Cerebras → HuggingFace → Cohere → Cloudflare → OpenCode Zen →
 Poolside → Hetzner → Z.AI → LLM7 → OVHcloud; see
 [adr/0001-fork-conventions.md](adr/0001-fork-conventions.md)). If the first
 deployment fails — rate limit, timeout, provider error — the proxy moves to
