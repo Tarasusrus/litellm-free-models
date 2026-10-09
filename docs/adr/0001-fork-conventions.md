@@ -82,17 +82,27 @@ marked `# Fork:`; on a sync, keep ours.
 
   | # | Provider | Reason |
   |---|---|---|
-  | 1 | Google AI Studio (Gemini) | generous free tier, strong models, honours `json_schema` |
-  | 2 | Groq | fastest answers, small daily budget |
-  | 3 | OpenRouter (free models) | widest catalogue behind one key |
-  | 4 | Mistral | |
-  | 5 | NVIDIA NIM | |
+  | 1 | Google AI Studio (Gemini) | strong models, honours `json_schema`; 500 requests/day per model |
+  | 2 | Mistral | ~1 request/s, ~1B tokens/month on the free tier |
+  | 3 | NVIDIA NIM | ~40 rpm, no published daily cap |
+  | 4 | Groq | fastest answers, small daily budget |
+  | 5 | OpenRouter (free models) | widest catalogue behind one key; 50 requests/day without credits |
   | 6–13 | Cerebras, HuggingFace, Cohere, Cloudflare, OpenCode Zen, Poolside, Hetzner, Z.AI | keyed providers, by free-tier request budget (`rpm` in `providers_config.py`), ties alphabetical |
   | 14 | ElevenLabs | no chat models; listed so the set stays complete |
   | 15 | LLM7.io | anonymous tier, 10 rpm shared by everyone |
   | 16 | OVHcloud | anonymous tier; only with a key |
 
   The first five are an operator decision; the rest follow the budget rule.
+  Reordered 2026-10-09: Gemini's daily cap ran out by morning and the
+  small daily budgets of Groq and OpenRouter were next, so job-hunt stalled
+  for hours; Mistral and NVIDIA carry far more per day.
+
+  Deployments in `fork/standard.py` `EXCLUDED` (`model @ host` -> date and
+  evidence) never enter `standard` or `tools`: retired, paid only, not in
+  the account's tier, or not text models. Candidates come from
+  `tools/find-dead-deployments.py`; a rate limit or timeout never
+  qualifies. `tests/test_standard_route.py` fails on an entry that names
+  no catalogued deployment.
   `tests/test_standard_route.py` fails when a provider exists in
   `providers_config.PROVIDERS` without a slot here, so an upstream sync that
   adds a provider has to assign one deliberately.

@@ -94,6 +94,16 @@ class TestChainProperties(unittest.TestCase):
         self.assertEqual(len(got), len(set(got)))
 
     @settings(max_examples=300, deadline=None)
+    @given(st.lists(block_st, max_size=30), env_st, verified_st, verified_st)
+    def test_an_excluded_deployment_leaves_tools_even_when_allowlisted(self, blocks, env, verified, excluded):
+        # A tool-calling pass recorded before the provider retired the
+        # model must not keep it in `tools`.
+        got = [_key(b) for b in tools_route.chain(blocks, env, verified=verified, excluded=excluded)]
+        self.assertFalse(set(got) & set(excluded))
+        self.assertEqual(got, [_key(b) for b in standard.chain(blocks, env, excluded=excluded)
+                               if _key(b) in verified])
+
+    @settings(max_examples=300, deadline=None)
     @given(st.lists(block_st, max_size=30), env_st)
     def test_empty_allowlist_means_empty_route(self, blocks, env):
         self.assertEqual(tools_route.chain(blocks, env, verified={}), [])

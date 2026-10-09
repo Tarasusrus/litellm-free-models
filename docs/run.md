@@ -121,6 +121,26 @@ matched the schema. `standard` keeps providers that cannot do strict JSON,
 so a failed attempt there is information, not a defect — see
 `docs/USAGE.md` → Structured output.
 
+## Live checks spend the free quotas
+
+`/health?model=standard`, `tools/find-dead-deployments.py` and the smokes
+send a real request to every deployment they cover. Each run takes one
+request out of every provider's free quota, and some quotas are tiny:
+OpenRouter's free models allow 50 requests a day across all of them
+without purchased credits, Gemini 500 a day per model.
+
+Run a live check once, save its output, and work from the saved copy:
+
+```bash
+curl -s "localhost:4444/health?model=standard" -H "Authorization: Bearer $LITELLM_MASTER_KEY" > /tmp/health.json
+```
+
+Never re-run it to look at another field, to retry a parse, or "to be
+sure". On 2026-10-09 three `/health` runs in a row, each only to read a
+different detail of the same failures, spent the whole OpenRouter free
+quota for the day and the proxy's real clients (job-hunt) lost that
+provider until the reset.
+
 ## Known limits (2026-09-16)
 
 - OVHcloud anonymous deployments fail inside LiteLLM v1.97.0 (`api_key: ""`

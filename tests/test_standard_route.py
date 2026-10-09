@@ -11,6 +11,7 @@ tests exist to catch.
 import re
 import tempfile
 import unittest
+from datetime import date
 from pathlib import Path
 
 from hypothesis import given, settings
@@ -38,8 +39,13 @@ def _has_key(provider: str, env: dict) -> bool:
     return bool(prov.env_var and env.get(prov.env_var))
 
 
-def _expected_chain(blocks: list[dict], env: dict) -> list[tuple[str, str]]:
-    """Ordered, de-duplicated (model, api_base) of every keyed chat block."""
+def _name(model_id: str, api_base: str) -> str:
+    return f"{model_id} @ {api_base}" if api_base else model_id
+
+
+def _expected_chain(blocks: list[dict], env: dict, excluded=()) -> list[tuple[str, str]]:
+    """Ordered, de-duplicated (model, api_base) of every keyed chat block
+    whose `model @ host` is not in `excluded`."""
     rank = {name: i for i, name in enumerate(standard.PROVIDER_PRIORITY)}
     picked: list[tuple[int, int, tuple[str, str]]] = []
     seen: set[tuple[str, str]] = set()
@@ -49,6 +55,8 @@ def _expected_chain(blocks: list[dict], env: dict) -> list[tuple[str, str]]:
         if not _has_key(b["provider"], env):
             continue
         key = (b["model_id"], b.get("api_base", ""))
+        if _name(*key) in excluded:
+            continue
         if key in seen:
             continue
         seen.add(key)
@@ -88,6 +96,21 @@ class TestChainProperties(unittest.TestCase):
         chain = standard.chain(blocks, env)
         got = [(b["model_id"], b.get("api_base", "")) for b in chain]
         self.assertEqual(got, _expected_chain(blocks, env))
+
+    @settings(max_examples=300, deadline=None)
+    @given(st.lists(block_st, max_size=30), env_st, st.data())
+    def test_excluded_deployments_never_enter_the_chain_and_nothing_else_leaves(self, blocks, env, data):
+        names = sorted({_name(b["model_id"], b["api_base"]) for b in blocks})
+        picked = data.draw(st.lists(st.sampled_from(names), unique=True)) if names else []
+        excluded = {n: "2026-10-09 test" for n in picked}
+        chain = standard.chain(blocks, env, excluded=excluded)
+        got = [(b["model_id"], b.get("api_base", "")) for b in chain]
+        self.assertEqual(got, _expected_chain(blocks, env, excluded))
+        self.assertFalse({_name(*k) for k in got} & set(excluded))
+
+    def test_deployment_name_matches_the_tools_allowlist_spelling(self):
+        self.assertEqual(standard.deployment_name("openai/x", "https://h/v1"), "openai/x @ https://h/v1")
+        self.assertEqual(standard.deployment_name("gemini/z"), "gemini/z")
 
     @settings(max_examples=300, deadline=None)
     @given(st.lists(block_st, max_size=30), env_st)
@@ -205,7 +228,7 @@ class TestRenderedStandardRoute(unittest.TestCase):
         lines, full_env = _render(env, redis)
         _, _, blocks = rc.parse_blocks(lines)
         got = [(b["model_id"], b["api_base"]) for b in blocks if b["model_name"] == ROUTE]
-        self.assertEqual(got, _expected_chain(_template_blocks(full_env), full_env))
+        self.assertEqual(got, _expected_chain(_template_blocks(full_env), full_env, standard.EXCLUDED))
 
     @settings(max_examples=25, deadline=None)
     @given(env_st, st.booleans())
@@ -224,11 +247,41 @@ class TestRenderedStandardRoute(unittest.TestCase):
         self.assertEqual(len(depth), 1)
         self.assertGreaterEqual(depth[0], n)
 
+    def test_no_excluded_deployment_in_any_generated_route(self):
+        # Every key set, so every catalogued deployment is a candidate; the
+        # excluded ones must be absent from `standard` and from `tools`,
+        # which is built on top of it.
+        env = {k: "x" for k in PROVIDER_KEYS}
+        lines, _ = _render(env, redis=False)
+        _, _, blocks = rc.parse_blocks(lines)
+        routed = {(b["model_name"], _name(b["model_id"], b["api_base"])) for b in blocks
+                  if b["model_name"] in (ROUTE, "tools")}
+        self.assertTrue(any(r == ROUTE for r, _ in routed))
+        self.assertEqual({(r, n) for r, n in routed if n in standard.EXCLUDED}, set())
+
     def test_standard_is_not_in_the_upstream_template(self):
         # The route is generated; the template stays upstream's.
         text = TEMPLATE.read_text(encoding="utf-8")
         self.assertNotIn(f"model_name: {ROUTE}", text)
         self.assertNotIn("vacancy-parse", text)
+
+
+class TestExcludedList(unittest.TestCase):
+    """fork/standard.py EXCLUDED: hand-kept, so it can go stale or carry a typo."""
+
+    def test_every_entry_names_a_catalogued_deployment(self):
+        # A key that matches nothing excludes nothing: a typo, or upstream
+        # dropped the model and the entry is now noise.
+        env = {k: "x" for k in PROVIDER_KEYS}
+        env.update(CLOUDFLARE_API_BASE="https://cf/v1")
+        catalogue = {_name(b["model_id"], b["api_base"]) for b in _template_blocks(env)}
+        self.assertEqual(sorted(set(standard.EXCLUDED) - catalogue), [])
+
+    def test_every_entry_carries_the_date_and_the_evidence(self):
+        for key, value in standard.EXCLUDED.items():
+            day, _, why = value.partition(" ")
+            date.fromisoformat(day)
+            self.assertTrue(why.strip(), key)
 
 
 if __name__ == "__main__":
