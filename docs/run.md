@@ -133,6 +133,7 @@ Run a live check once, save its output, and work from the saved copy:
 
 ```bash
 curl -s "localhost:4444/health?model=standard" -H "Authorization: Bearer $LITELLM_MASTER_KEY" > /tmp/health.json
+python3 tools/find-dead-deployments.py --from-file /tmp/health.json   # classify the copy, no quota spent
 ```
 
 Never re-run it to look at another field, to retry a parse, or "to be

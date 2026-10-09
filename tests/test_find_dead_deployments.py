@@ -32,9 +32,9 @@ OBSERVED: list[tuple[str, str]] = [
     ("litellm.APIError: APIError: OpenrouterException - {\"error\":{\"message\":\"Insufficient credits. This "
      "account never purchased credits.", "permanent"),
     ("litellm.APIError: APIError: MistralException - {\"message\":\"This model is not available in your "
-     "subscription tier\",\"type\":\"tier_not_allowed\",\"raw_status_code\":403}", "permanent"),
+     "subscription tier\",\"type\":\"tier_not_allowed\",\"raw_status_code\":403}", "key"),
     ("litellm.AuthenticationError: AuthenticationError: OpenAIException - Your API key is invalid, expired, "
-     "or revoked.", "permanent"),
+     "or revoked.", "key"),
     ("litellm.NotFoundError: NotFoundError: OpenAIException - Error code: 404 - {'status': 404, 'title': "
      "'Not Found', 'detail': \"Function 'ee47df99' not found\"}", "permanent"),
     ("litellm.RateLimitError: geminiException - {\"error\": {\"code\": 429, \"message\": \"You exceeded your "
@@ -64,6 +64,27 @@ class TestClassify(unittest.TestCase):
            st.sampled_from([t for t, k in OBSERVED if k == "permanent"]))
     def test_a_permanent_marker_wins_over_retry_words_in_the_same_text(self, transient, permanent):
         self.assertEqual(dead.classify(f"{transient} ... {permanent}")[0], "permanent")
+
+    def test_a_bare_number_is_not_a_status(self):
+        for text in ("litellm.RateLimitError: Requested 410 tokens, limit 400. Retry in 404 ms",
+                     "Too many requests: 401 per minute allowed",
+                     "RateLimitError traceback: if response.status_code == 404:"):
+            with self.subTest(text=text):
+                self.assertEqual(dead.classify(text)[0], "transient")
+
+    def test_code_first_formats_still_count(self):
+        for text, kind in (("HTTP Error 404: Not Found", "permanent"), ("410 Gone", "permanent"),
+                           ("404 page not found", "permanent"), ("502 Bad Gateway", "transient"),
+                           ("Service Unavailable 503", "transient"), ("401 Unauthorized", "key")):
+            with self.subTest(text=text):
+                self.assertEqual(dead.classify(text)[0], kind)
+
+    def test_a_non_report_is_an_error_not_a_clean_run(self):
+        for bad in ({"error": {"message": "Authentication Error"}}, {"unhealthy_endpoints": None},
+                    {"unhealthy_endpoints": ["x"]}, [], "x"):
+            with self.subTest(bad=bad):
+                self.assertIsNotNone(dead.shape_problem(bad))
+        self.assertIsNone(dead.shape_problem({"healthy_endpoints": [], "unhealthy_endpoints": []}))
 
     def test_unrecognised_text_is_not_a_candidate_kind(self):
         self.assertEqual(dead.classify("something new")[0], "unknown")
@@ -120,7 +141,8 @@ class TestCandidates(unittest.TestCase):
 
     def test_endpoint_key_is_the_excluded_spelling(self):
         ep = {"model": "openai/openai/gpt-oss-120b", "api_base": NVIDIA}
-        self.assertIn(dead.endpoint_key(ep), standard.EXCLUDED)
+        # The literal spelling EXCLUDED's hand-written keys depend on.
+        self.assertEqual(dead.endpoint_key(ep), "openai/openai/gpt-oss-120b @ https://integrate.api.nvidia.com/v1")
         self.assertEqual(dead.endpoint_key({"model": "groq/qwen/qwen3.6-27b", "api_base": None}),
                          "groq/qwen/qwen3.6-27b")
 
