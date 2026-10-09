@@ -20,7 +20,7 @@ from fork import standard
 
 ROUTE_NAME = "tools"
 
-KEY_SEP = " @ "
+KEY_SEP = standard.KEY_SEP
 
 # Deployments that returned a well-formed `tool_calls` (valid JSON
 # arguments) and then a final text after the `role: tool` reply, on every
@@ -48,7 +48,7 @@ TOOL_CALLING_VERIFIED: dict[str, str] = {
 
 def verified_key(model_id: str, api_base: str = "") -> str:
     """Identity of a deployment as the allowlist spells it: `model @ host`."""
-    return f"{model_id}{KEY_SEP}{api_base}" if api_base else model_id
+    return standard.deployment_name(model_id, api_base)
 
 
 def split_verified_key(key: str) -> tuple[str, str]:
@@ -57,11 +57,15 @@ def split_verified_key(key: str) -> tuple[str, str]:
 
 
 def chain(blocks: list[dict], env: dict[str, str], providers: dict | None = None,
-          verified: dict[str, str] | None = None) -> list[dict]:
-    """The `standard` chain filtered to allowlisted deployments, order kept."""
+          verified: dict[str, str] | None = None,
+          excluded: dict[str, str] | None = None) -> list[dict]:
+    """The `standard` chain filtered to allowlisted deployments, order kept.
+
+    Built on `standard.chain`, so standard.EXCLUDED applies here too: an
+    allowlisted deployment that has since died stays out of `tools`."""
     if verified is None:
         verified = TOOL_CALLING_VERIFIED
-    return [b for b in standard.chain(blocks, env, providers)
+    return [b for b in standard.chain(blocks, env, providers, excluded)
             if verified_key(b["model_id"], b.get("api_base", "")) in verified]
 
 
