@@ -82,7 +82,8 @@ def _model_list_end(lines: list[str]) -> int:
 def add_standard_route(lines: list[str], env: dict[str, str]) -> tuple[list[str], list[dict]]:
     """Appends the generated `standard` deployments and returns (lines, chain)."""
     _, _, blocks = rc.parse_blocks(lines)
-    chain = standard.chain(blocks, env)
+    chain = [b for b in standard.chain(blocks, env)
+             if standard.deployment_name(*standard.deployment_key(b)) not in standard.RESERVED]
     if not chain:
         return lines, chain
     end = _model_list_end(lines)

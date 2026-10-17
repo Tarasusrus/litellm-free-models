@@ -228,7 +228,8 @@ class TestRenderedStandardRoute(unittest.TestCase):
         lines, full_env = _render(env, redis)
         _, _, blocks = rc.parse_blocks(lines)
         got = [(b["model_id"], b["api_base"]) for b in blocks if b["model_name"] == ROUTE]
-        self.assertEqual(got, _expected_chain(_template_blocks(full_env), full_env, standard.EXCLUDED))
+        self.assertEqual(got, _expected_chain(_template_blocks(full_env), full_env,
+                                              {**standard.EXCLUDED, **standard.RESERVED}))
 
     @settings(max_examples=25, deadline=None)
     @given(env_st, st.booleans())

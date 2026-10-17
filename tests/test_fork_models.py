@@ -9,6 +9,7 @@ invariants are cheap to pin and expensive to discover in production.
 import unittest
 from collections import defaultdict
 
+from fork import standard
 from tests._loader import REPO_ROOT, load_script
 
 rc = load_script("render-config.py")
@@ -76,11 +77,14 @@ class TestGeminiBudgets(unittest.TestCase):
             with self.subTest(model=model):
                 self.assertLessEqual(rpm, FREE_TIER[model][0])
 
-    def test_flash_tier_is_not_deployed(self):
-        """20 requests a day: never a chain member (see fork/models.yaml)."""
+    def test_flash_tier_is_never_in_standard(self):
+        """20 requests a day: never a `standard` member (see fork/models.yaml).
+        A flash deployment is allowed only when standard.RESERVED keeps it for
+        an allowlisted route."""
         for b in self.gemini:
             with self.subTest(model=b["model_id"]):
-                self.assertGreaterEqual(FREE_TIER[self._resolved(b)][0], 10)
+                if FREE_TIER[self._resolved(b)][0] < 10:
+                    self.assertIn(b["model_id"], standard.RESERVED)
 
 
 class TestOnboardingTreatsGeminiAsRequired(unittest.TestCase):
