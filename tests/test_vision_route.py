@@ -214,3 +214,26 @@ class TestRenderedVisionRoute(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestReservedFlash(unittest.TestCase):
+    """gemini-flash-latest has 20 requests a day: it serves `vision` only."""
+
+    def test_reserved_deployment_is_in_vision_but_not_in_standard(self):
+        env = {k: "" for k in PROVIDER_KEYS}
+        env[PROVIDERS["google-ai"].env_var] = "x"
+        cfg = _render(env)
+        by_route = {}
+        for d in cfg["model_list"]:
+            by_route.setdefault(d["model_name"], []).append(d["litellm_params"]["model"])
+        self.assertIn("gemini/gemini-flash-latest", by_route.get(ROUTE, []))
+        self.assertNotIn("gemini/gemini-flash-latest", by_route.get(standard.ROUTE_NAME, []))
+        for model in standard.RESERVED:
+            self.assertNotIn(model, by_route.get(standard.ROUTE_NAME, []))
+
+    def test_every_allowlisted_deployment_exists_in_the_catalogue(self):
+        env = {k: "x" for k in PROVIDER_KEYS}
+        cfg = _render(env)
+        models = {d["litellm_params"]["model"] for d in cfg["model_list"]}
+        for key in vision_route.VISION_VERIFIED:
+            self.assertIn(key.split(" @ ")[0], models)

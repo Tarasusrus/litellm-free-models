@@ -31,7 +31,11 @@ KEY_SEP = standard.KEY_SEP
 # Empty until a live run passes: while it is empty the route is not
 # rendered, `vision` is absent from /v1/models and /model/info, and a client
 # that reads /model/info (simpleAI) reports the feature as not configured.
-VISION_VERIFIED: dict[str, str] = {}
+VISION_VERIFIED: dict[str, str] = {
+    # Google AI Studio flash tier (reserved for this route, see
+    # standard.RESERVED), read 247.5 THB on every attempt
+    "gemini/gemini-flash-latest": "2026-10-17",
+}
 
 
 def verified_key(model_id: str, api_base: str = "") -> str:

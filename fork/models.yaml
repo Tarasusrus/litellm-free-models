@@ -58,3 +58,20 @@
       input_cost_per_token: 0
       output_cost_per_token: 0
       mode: chat
+
+  # Flash tier, reserved for the `vision` route (standard.RESERVED keeps it
+  # out of `standard`): 5 RPM / 20 RPD would be spent by the chain in
+  # minutes, but is plenty for receipt photos. Read the synthetic receipt
+  # correctly on 2026-10-17 when the flash-lite quota was spent.
+  - model_name: gemini-flash-latest
+    litellm_params:
+      model: gemini/gemini-flash-latest
+      api_key: os.environ/GEMINI_API_KEY
+      tpm: 250000
+      rpm: 5
+      timeout: 60
+      num_retries: 1
+    model_info:
+      input_cost_per_token: 0
+      output_cost_per_token: 0
+      mode: chat

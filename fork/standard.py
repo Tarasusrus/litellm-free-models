@@ -97,6 +97,15 @@ EXCLUDED: dict[str, str] = {
 }
 
 
+# Deployments kept out of the `standard` route itself but still available to
+# the allowlisted routes built on standard.chain (tools, vision). Key =
+# deployment_name(), value = why. A tiny daily budget that the general
+# chain would spend before the narrowed route ever gets a request.
+RESERVED: dict[str, str] = {
+    "gemini/gemini-flash-latest": "20 requests/day: kept for `vision` (receipt photos)",
+}
+
+
 def deployment_key(block: dict) -> tuple[str, str]:
     """What makes two deployments the same backend: model id + host."""
     return block["model_id"], block.get("api_base", "")
