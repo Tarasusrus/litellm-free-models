@@ -174,6 +174,38 @@ new provider needs a slot in `PROVIDER_PRIORITY` and in the table above.
   `/v1/models` until a verified deployment has a key.
 - The settings page shows both chains after Apply.
 
+### 6. The `vision` route
+
+- Purpose: clients that send an image (or a PDF) and must get an answer
+  from a model that sees it — first consumer: simpleAI receipt photos
+  (Tarasusrus/simpleAI#76). A text model behind `drop_params: true` does
+  not fail on an `image_url` part: it answers about a picture it never
+  saw, or hangs. Upstream's own fallbacks lead there: a named group ends in
+  `"*"` (text models), and `gemini-3.1-flash-lite` falls back to
+  `gpt-oss-20b` explicitly. Seen live on 2026-10-17: a request to
+  `gemini-3.5-flash-lite` was answered by `openai/gpt-oss-20b` after
+  Gemini refused.
+- Same mechanics as `tools` (§5): generated at render time from `standard`,
+  same provider order, unique `order`, closed with `{"vision": []}` so the
+  request never reaches `"*"`. Invariants, property-tested in
+  `tests/test_vision_route.py`: `vision` ⊆ `standard` by deployment, in
+  `standard`'s order, nothing outside `VISION_VERIFIED`
+  (`fork/vision_route.py`), empty allowlist → no route.
+- Each `vision` deployment carries `model_info.supports_vision: true`.
+  LiteLLM fills the flag from its model map only for providers it knows
+  (`gemini/*`); for OpenAI-compatible hosts it stays `null`, and a client
+  that reads `/model/info` must treat the whole group as vision-capable.
+  The flag is added at render time, not in the template (§1–2).
+- The allowlist is filled only from live runs of `tools/smoke-vision.py`
+  on a synthetic receipt, addressed by deployment id so that a fallback
+  cannot answer for it; a deployment enters only if it read the total
+  correctly on every attempt. The value is the date of the run.
+- Privacy: images are personal data. Requests on this route must not be
+  stored in Langfuse traces, spend logs or the response cache with their
+  base64 content (to be verified and enforced before production use).
+- The settings page and the start-up log show the chain next to `standard`
+  and `tools`.
+
 ## Consequences
 
 - Upstream syncs are mechanical; the template is never edited by hand here.

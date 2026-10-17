@@ -53,13 +53,13 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from fork import tools_route  # noqa: E402
+from fork import tools_route, vision_route  # noqa: E402
 
 TOOL_NAME = "get_weather"
 
 # Routes fork/render.py generates: copies of other backends, never a
 # deployment of their own, so --all-deployments skips them.
-GENERATED_ROUTES = frozenset({"standard", tools_route.ROUTE_NAME})
+GENERATED_ROUTES = frozenset({"standard", tools_route.ROUTE_NAME, vision_route.ROUTE_NAME})
 
 TOOL_DEF = {
     "type": "function",

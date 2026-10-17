@@ -10,8 +10,11 @@ Drop-in for `python3 render-config.py` (same flags).
   2. Appends the `standard` deployments to model_list -- every chat
      deployment that survived the provider filter, copied with a unique
      `order` (fork/standard.py) -- and the `tools` deployments: the same
-     chain narrowed to the tool-calling allowlist (fork/tools_route.py).
-  3. Pins `{"standard": []}` and `{"tools": []}` in router_settings.fallbacks,
+     chain narrowed to the tool-calling allowlist (fork/tools_route.py),
+     and the `vision` deployments: narrowed to the image-reading allowlist
+     and flagged `supports_vision` (fork/vision_route.py).
+  3. Pins `{"standard": []}`, `{"tools": []}` and `{"vision": []}` in
+     router_settings.fallbacks,
      so each route ends explicitly instead of drifting into the catch-all '*'.
   4. Sets `router_settings.max_fallbacks` to the longest chain: LiteLLM's
      order-based fallback walks one order level per hop and stops at
@@ -37,7 +40,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from fork import standard, tools_route  # noqa: E402
+from fork import standard, tools_route, vision_route  # noqa: E402
 
 
 def _load_upstream_renderer():
@@ -99,6 +102,16 @@ def add_tools_route(lines: list[str], env: dict[str, str]) -> tuple[list[str], l
     return lines[:end] + tools_route.render_blocks(chain) + ["\n"] + lines[end:], chain
 
 
+def add_vision_route(lines: list[str], env: dict[str, str]) -> tuple[list[str], list[dict]]:
+    """Appends the generated `vision` deployments and returns (lines, chain)."""
+    _, _, blocks = rc.parse_blocks(lines)
+    chain = vision_route.chain(blocks, env)
+    if not chain:
+        return lines, chain
+    end = _model_list_end(lines)
+    return lines[:end] + vision_route.render_blocks(chain) + ["\n"] + lines[end:], chain
+
+
 def pin_fallbacks(lines: list[str], chain_len: int,
                   routes: tuple[str, ...] = (standard.ROUTE_NAME,)) -> list[str]:
     """Explicit empty chain for each generated route + max_fallbacks deep enough.
@@ -155,14 +168,17 @@ def render(template_path: Path, env_path: Path, output_path: Path,
     lines = output_path.read_text(encoding="utf-8").splitlines(keepends=True)
     lines, chain = add_standard_route(lines, env)
     lines, tools_chain = add_tools_route(lines, env)
+    lines, vision_chain = add_vision_route(lines, env)
     routes = tuple(name for name, c in ((standard.ROUTE_NAME, chain),
-                                        (tools_route.ROUTE_NAME, tools_chain)) if c)
-    lines = pin_fallbacks(lines, max(len(chain), len(tools_chain)), routes)
+                                        (tools_route.ROUTE_NAME, tools_chain),
+                                        (vision_route.ROUTE_NAME, vision_chain)) if c)
+    lines = pin_fallbacks(lines, max(len(chain), len(tools_chain), len(vision_chain)), routes)
     tmp = output_path.with_suffix(output_path.suffix + ".tmp")
     tmp.write_text("".join(lines), encoding="utf-8")
     os.replace(tmp, output_path)
     print_chain(standard.ROUTE_NAME, chain)
     print_chain(tools_route.ROUTE_NAME, tools_chain)
+    print_chain(vision_route.ROUTE_NAME, vision_chain)
     return 0
 
 
