@@ -24,6 +24,7 @@ import argparse
 import base64
 import importlib.util
 import json
+import math
 import re
 import sys
 import time
@@ -68,7 +69,8 @@ def build_request(model: str, image: bytes, nonce: str, no_fallback: bool = Fals
             {"type": "image_url", "image_url": {"url": data_url}},
         ]}],
         "temperature": 0,
-        "max_tokens": 200,
+        # reasoning models spend hidden tokens before the answer
+        "max_tokens": 1024,
         "cache": {"no-cache": True},
     }
     if no_fallback:
@@ -92,7 +94,9 @@ def check_answer(content) -> tuple[bool, str]:
     except ValueError:
         return False, f"total is not a number: {obj.get('total')!r}"
     currency = str(obj.get("currency", "")).strip().upper()
-    if abs(total - EXPECTED_TOTAL) > 0.001 or currency != EXPECTED_CURRENCY:
+    # NaN compares false with everything: without isfinite a model that
+    # never saw the image would pass with {"total": NaN}.
+    if not math.isfinite(total) or abs(total - EXPECTED_TOTAL) > 0.001 or currency != EXPECTED_CURRENCY:
         return False, f"read {total} {currency!r}, want {EXPECTED_TOTAL} {EXPECTED_CURRENCY}"
     return True, ""
 
@@ -118,16 +122,6 @@ def run_attempt(base_url: str, api_key: str, model: str, image: bytes,
         return Attempt(False, err, model_id, tc._ms(t0), served)
     ok, reason = check_answer(message.get("content"))
     return Attempt(ok, reason, model_id, tc._ms(t0), served)
-
-
-def verified_deployments(results: dict[str, list[Attempt]]) -> set[str]:
-    good: set[str] = set()
-    bad: set[str] = set()
-    for attempts in results.values():
-        for a in attempts:
-            if a.deployment:
-                (good if a.ok else bad).add(a.deployment)
-    return good - bad
 
 
 def main() -> int:
@@ -186,10 +180,10 @@ def main() -> int:
             if wait > 0:
                 time.sleep(wait)
     print("\nDeployments that read the receipt every time (candidates for VISION_VERIFIED):")
-    for dep in sorted(verified_deployments(results)):
+    for dep in sorted(tc.verified_deployments(results)):
         known = vision_route.VISION_VERIFIED.get(dep)
         print(f"  {dep}" + (f"  (verified {known})" if known else "  (new)"))
-    return 0 if all(r and all(a.ok for a in r) for r in results.values()) else 1
+    return 0 if tc.all_passed(results) else 1
 
 
 if __name__ == "__main__":

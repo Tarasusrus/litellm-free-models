@@ -1,7 +1,7 @@
 """The `vision` route: `standard` narrowed to deployments that read images.
 
-A client that sends an `image_url` (or a PDF `file`) part sends `model:
-"vision"`. A text-only backend behind `drop_params: true` does not fail on
+A client that sends an `image_url` part sends `model: "vision"`. PDF
+`file` parts are not verified by the smoke and are not promised here. A text-only backend behind `drop_params: true` does not fail on
 such a request: it answers about a picture it never saw, or hangs -- and
 upstream's own fallbacks lead there (a named group ends in `"*"`, which is
 text models). `vision` keeps only the deployments that read a synthetic
@@ -27,6 +27,10 @@ KEY_SEP = standard.KEY_SEP
 # date of the run. Re-run the smoke to extend or refresh:
 #
 #   python3 tools/smoke-vision.py --all-deployments --n 3
+#
+# Empty until a live run passes: while it is empty the route is not
+# rendered, `vision` is absent from /v1/models and /model/info, and a client
+# that reads /model/info (simpleAI) reports the feature as not configured.
 VISION_VERIFIED: dict[str, str] = {}
 
 
@@ -57,6 +61,13 @@ _FLAG = "      supports_vision: true\n"
 _NO_MESSAGE_LOGGING = "      turn_off_message_logging: true\n"
 
 
+def _key_line(line: str) -> str:
+    """`    model_info:  # note` -> `model_info:`; indentation and an inline
+    comment must not hide the key (standard.render_blocks matches on
+    strip() too)."""
+    return line.split("#", 1)[0].strip()
+
+
 def _with_vision_flag(lines: list[str]) -> list[str]:
     """One deployment's lines with `model_info.supports_vision: true` and
     `litellm_params.turn_off_message_logging: true`.
@@ -66,11 +77,11 @@ def _with_vision_flag(lines: list[str]) -> list[str]:
     out = [ln for ln in lines
            if not ln.strip().startswith(("supports_vision:", "turn_off_message_logging:"))]
     for i, ln in enumerate(out):
-        if ln.rstrip() == "    litellm_params:":
+        if _key_line(ln) == "litellm_params:":
             out = out[:i + 1] + [_NO_MESSAGE_LOGGING] + out[i + 1:]
             break
     for i, ln in enumerate(out):
-        if ln.rstrip() == "    model_info:":
+        if _key_line(ln) == "model_info:":
             return out[:i + 1] + [_FLAG] + out[i + 1:]
     end = len(out)
     while end and not out[end - 1].strip():

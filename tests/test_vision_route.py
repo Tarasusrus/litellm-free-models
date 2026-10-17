@@ -124,6 +124,28 @@ class TestRenderedBlocks(unittest.TestCase):
                          {"supports_vision": True})
 
 
+class TestKeyLineMatching(unittest.TestCase):
+    def test_commented_model_info_is_reused_not_duplicated(self):
+        b = _block("a", "google-ai", "gemini/z", "", "chat", 5, "")
+        b["lines"] = [ln.replace("    model_info:\n", "    model_info:  # costs are documentary\n")
+                      .replace("    litellm_params:\n", "    litellm_params:   # call params\n")
+                      for ln in b["lines"]]
+        d = _deployments(vision_route.render_blocks([b]))[0]
+        self.assertEqual(d["model_info"], {"mode": "chat", "supports_vision": True})
+        self.assertIs(d["litellm_params"]["turn_off_message_logging"], True)
+
+
+class TestRouteListsAgree(unittest.TestCase):
+    def test_settings_ui_and_render_list_the_same_routes(self):
+        settings_ui = load_script("fork/settings_ui.py")
+        self.assertEqual(settings_ui.ROUTES,
+                         (standard.ROUTE_NAME,) + tuple(r.ROUTE_NAME for r in fork_render.NARROWED_ROUTES))
+
+    def test_settings_page_does_not_hardcode_routes(self):
+        html = (REPO_ROOT / "fork" / "settings_ui.html").read_text(encoding="utf-8")
+        self.assertNotIn('["standard", "tools"]', html)
+
+
 # ─── Full render against the real template ──────────────────────────────────
 
 GEMINI_VISION = {

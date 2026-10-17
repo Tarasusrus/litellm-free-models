@@ -288,6 +288,7 @@ _CHAIN_LINE = re.compile(r"^\s*(\d+)\.\s+(\S+)\s+(\S+)\s*$")
 _ROUTE_HEADER = re.compile(r"'([a-z][a-z0-9_-]*)' route: \d+ deployment\(s\)")
 
 # The routes fork/render.py prints at every start, in print order.
+# Must match fork/render.py (standard, then NARROWED_ROUTES); a test pins it.
 ROUTES: tuple[str, ...] = (standard.ROUTE_NAME, tools_route.ROUTE_NAME, vision_route.ROUTE_NAME)
 
 

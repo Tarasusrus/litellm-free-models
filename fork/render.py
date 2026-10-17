@@ -89,27 +89,23 @@ def add_standard_route(lines: list[str], env: dict[str, str]) -> tuple[list[str]
     return lines[:end] + standard.render_blocks(chain) + ["\n"] + lines[end:], chain
 
 
-def add_tools_route(lines: list[str], env: dict[str, str]) -> tuple[list[str], list[dict]]:
-    """Appends the generated `tools` deployments and returns (lines, chain).
+# Routes narrowed from `standard` by an allowlist; each module provides
+# ROUTE_NAME, chain(blocks, env) and render_blocks(chain).
+NARROWED_ROUTES = (tools_route, vision_route)
+
+
+def add_narrowed_route(lines: list[str], env: dict[str, str], route) -> tuple[list[str], list[dict]]:
+    """Appends one allowlisted route's deployments and returns (lines, chain).
 
     Built from the same parsed blocks as `standard` (the `standard` copies
     carry the same backends, so they are de-duplicated away)."""
     _, _, blocks = rc.parse_blocks(lines)
-    chain = tools_route.chain(blocks, env)
+    chain = route.chain(blocks, env)
     if not chain:
         return lines, chain
     end = _model_list_end(lines)
-    return lines[:end] + tools_route.render_blocks(chain) + ["\n"] + lines[end:], chain
+    return lines[:end] + route.render_blocks(chain) + ["\n"] + lines[end:], chain
 
-
-def add_vision_route(lines: list[str], env: dict[str, str]) -> tuple[list[str], list[dict]]:
-    """Appends the generated `vision` deployments and returns (lines, chain)."""
-    _, _, blocks = rc.parse_blocks(lines)
-    chain = vision_route.chain(blocks, env)
-    if not chain:
-        return lines, chain
-    end = _model_list_end(lines)
-    return lines[:end] + vision_route.render_blocks(chain) + ["\n"] + lines[end:], chain
 
 
 def pin_fallbacks(lines: list[str], chain_len: int,
@@ -167,18 +163,16 @@ def render(template_path: Path, env_path: Path, output_path: Path,
     env = rc.load_env(env_path)
     lines = output_path.read_text(encoding="utf-8").splitlines(keepends=True)
     lines, chain = add_standard_route(lines, env)
-    lines, tools_chain = add_tools_route(lines, env)
-    lines, vision_chain = add_vision_route(lines, env)
-    routes = tuple(name for name, c in ((standard.ROUTE_NAME, chain),
-                                        (tools_route.ROUTE_NAME, tools_chain),
-                                        (vision_route.ROUTE_NAME, vision_chain)) if c)
-    lines = pin_fallbacks(lines, max(len(chain), len(tools_chain), len(vision_chain)), routes)
+    chains = {standard.ROUTE_NAME: chain}
+    for route in NARROWED_ROUTES:
+        lines, chains[route.ROUTE_NAME] = add_narrowed_route(lines, env, route)
+    routes = tuple(name for name, c in chains.items() if c)
+    lines = pin_fallbacks(lines, max(len(c) for c in chains.values()), routes)
     tmp = output_path.with_suffix(output_path.suffix + ".tmp")
     tmp.write_text("".join(lines), encoding="utf-8")
     os.replace(tmp, output_path)
-    print_chain(standard.ROUTE_NAME, chain)
-    print_chain(tools_route.ROUTE_NAME, tools_chain)
-    print_chain(vision_route.ROUTE_NAME, vision_chain)
+    for name, c in chains.items():
+        print_chain(name, c)
     return 0
 
 

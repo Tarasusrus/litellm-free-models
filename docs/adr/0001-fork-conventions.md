@@ -176,7 +176,7 @@ new provider needs a slot in `PROVIDER_PRIORITY` and in the table above.
 
 ### 6. The `vision` route
 
-- Purpose: clients that send an image (or a PDF) and must get an answer
+- Purpose: clients that send an image and must get an answer
   from a model that sees it — first consumer: simpleAI receipt photos
   (Tarasusrus/simpleAI#76). A text model behind `drop_params: true` does
   not fail on an `image_url` part: it answers about a picture it never
@@ -199,14 +199,21 @@ new provider needs a slot in `PROVIDER_PRIORITY` and in the table above.
 - The allowlist is filled only from live runs of `tools/smoke-vision.py`
   on a synthetic receipt, addressed by deployment id so that a fallback
   cannot answer for it; a deployment enters only if it read the total
-  correctly on every attempt. The value is the date of the run.
+  correctly on every attempt. The value is the date of the run. PDF `file`
+  parts are not part of the smoke and not promised by the route.
+- While the allowlist is empty the route is not rendered: `vision` is
+  absent from `/v1/models` and `/model/info`, and simpleAI reports photo
+  processing as not configured. The first run (2026-10-17) verified
+  nothing — the Gemini daily quota was spent — so the route ships off.
 - Privacy: images are personal data. Every `vision` deployment carries
   `litellm_params.turn_off_message_logging: true`: LiteLLM passes
   deployment params into the call, where this key switches message
   redaction on for every logging callback (Langfuse, spend logs) — the
   trace keeps model, timing and status. A client cannot set it itself:
   LiteLLM rejects it in the request body as a client-side passthrough
-  (seen live 2026-10-17); clients may add the
+  (seen live 2026-10-17); it is in LiteLLM's `all_litellm_params`, so it
+  is stripped before the provider call and never reaches the provider's
+  request body (checked in v1.97.0 source); clients may add the
   `x-litellm-enable-message-redaction: true` header as a second layer.
   Not yet seen in a live Langfuse trace: the local proxy runs without
   Langfuse, so the check belongs to the server deployment.

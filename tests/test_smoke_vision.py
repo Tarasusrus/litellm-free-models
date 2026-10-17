@@ -19,6 +19,9 @@ class TestCheckAnswer(unittest.TestCase):
         for content in ['{"total": 300, "currency": "THB"}',      # read CASH, not TOTAL
                         '{"total": 247.5, "currency": "USD"}',
                         '{"total": "n/a", "currency": "THB"}',
+                        '{"total": NaN, "currency": "THB"}',
+                        '{"total": "nan", "currency": "THB"}',
+                        '{"total": "inf", "currency": "THB"}',
                         "I cannot see images.",
                         None, ""]:
             ok, reason = smoke.check_answer(content)
