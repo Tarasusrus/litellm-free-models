@@ -49,13 +49,26 @@ def chain(blocks: list[dict], env: dict[str, str], providers: dict | None = None
 
 _FLAG = "      supports_vision: true\n"
 
+# Images are personal data (receipts). LiteLLM passes deployment
+# litellm_params into the call, where `turn_off_message_logging` is a
+# per-request switch for every logging callback (Langfuse, spend logs):
+# the trace keeps model, timing and status, the messages become
+# "redacted-by-litellm". Set here, it holds no matter what the client sends.
+_NO_MESSAGE_LOGGING = "      turn_off_message_logging: true\n"
+
 
 def _with_vision_flag(lines: list[str]) -> list[str]:
-    """One deployment's lines with `model_info.supports_vision: true`.
+    """One deployment's lines with `model_info.supports_vision: true` and
+    `litellm_params.turn_off_message_logging: true`.
 
-    An existing `supports_vision` line is replaced, not duplicated; a block
+    Existing lines for either key are replaced, not duplicated; a block
     without `model_info` gets one."""
-    out = [ln for ln in lines if not ln.strip().startswith("supports_vision:")]
+    out = [ln for ln in lines
+           if not ln.strip().startswith(("supports_vision:", "turn_off_message_logging:"))]
+    for i, ln in enumerate(out):
+        if ln.rstrip() == "    litellm_params:":
+            out = out[:i + 1] + [_NO_MESSAGE_LOGGING] + out[i + 1:]
+            break
     for i, ln in enumerate(out):
         if ln.rstrip() == "    model_info:":
             return out[:i + 1] + [_FLAG] + out[i + 1:]

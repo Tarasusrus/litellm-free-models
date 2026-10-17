@@ -105,6 +105,8 @@ class TestRenderedBlocks(unittest.TestCase):
         for n, (d, b) in enumerate(zip(deps, chain), start=1):
             self.assertEqual(d["model_name"], ROUTE)
             self.assertIs(d["model_info"]["supports_vision"], True)
+            # Receipts are personal data: messages never reach Langfuse.
+            self.assertIs(d["litellm_params"]["turn_off_message_logging"], True)
             self.assertEqual(d["litellm_params"]["order"], n)
             self.assertEqual(d["litellm_params"]["model"], b["model_id"])
 
@@ -112,6 +114,7 @@ class TestRenderedBlocks(unittest.TestCase):
         b = _block("a", "google-ai", "gemini/z", "", "chat", 5, "false")
         lines = vision_route.render_blocks([b])
         self.assertEqual(sum("supports_vision" in ln for ln in lines), 1)
+        self.assertEqual(sum("turn_off_message_logging" in ln for ln in lines), 1)
         d = _deployments(lines)[0]
         self.assertEqual(d["model_info"], {"mode": "chat", "supports_vision": True})
 
@@ -162,6 +165,7 @@ class TestRenderedVisionRoute(unittest.TestCase):
         # upstream's "*" (text models).
         self.assertEqual(fallbacks[ROUTE], [])
         self.assertTrue(all(d["model_info"]["supports_vision"] is True for d in deps))
+        self.assertTrue(all(d["litellm_params"]["turn_off_message_logging"] is True for d in deps))
         self.assertTrue({d["litellm_params"]["model"] for d in deps} <= set(GEMINI_VISION))
         self.assertGreaterEqual(cfg["router_settings"]["max_fallbacks"], len(deps))
 

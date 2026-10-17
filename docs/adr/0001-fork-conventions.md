@@ -200,9 +200,16 @@ new provider needs a slot in `PROVIDER_PRIORITY` and in the table above.
   on a synthetic receipt, addressed by deployment id so that a fallback
   cannot answer for it; a deployment enters only if it read the total
   correctly on every attempt. The value is the date of the run.
-- Privacy: images are personal data. Requests on this route must not be
-  stored in Langfuse traces, spend logs or the response cache with their
-  base64 content (to be verified and enforced before production use).
+- Privacy: images are personal data. Every `vision` deployment carries
+  `litellm_params.turn_off_message_logging: true`: LiteLLM passes
+  deployment params into the call, where this key switches message
+  redaction on for every logging callback (Langfuse, spend logs) — the
+  trace keeps model, timing and status. A client cannot set it itself:
+  LiteLLM rejects it in the request body as a client-side passthrough
+  (seen live 2026-10-17); clients may add the
+  `x-litellm-enable-message-redaction: true` header as a second layer.
+  Not yet seen in a live Langfuse trace: the local proxy runs without
+  Langfuse, so the check belongs to the server deployment.
 - The settings page and the start-up log show the chain next to `standard`
   and `tools`.
 
