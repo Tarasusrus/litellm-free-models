@@ -48,28 +48,28 @@ CLASSIFY_ORDER: tuple[str, ...] = (
     # LLM7.io: 40 rpm anonymous tier; DeepSeek-V4-Flash scored 19/19 in the
     # simpleAI golden set (2026-10-21), ~1 s.
     "openai/DeepSeek-V4-Flash-0731 @ https://api.llm7.io/v1",
-    # NVIDIA NIM, 40 rpm. Unverified through this repo's smoke.
-    "openai/deepseek-ai/deepseek-v4-flash-0731 @ https://integrate.api.nvidia.com/v1",
+    # NVIDIA NIM, 40 rpm, a plain (non-reasoning) instruct model. Unverified.
+    "openai/google/gemma-4-31b-it @ https://integrate.api.nvidia.com/v1",
     # Google AI Studio: strong json_schema support, verified 5/5; its daily
     # request quota is shared with other consumers, hence not first.
     "gemini/gemini-3.1-flash-lite",
     # Cerebras, 30 rpm, very fast. Unverified.
     "cerebras/gpt-oss-120b",
-    "openai/meta/llama-3.3-70b-instruct @ https://integrate.api.nvidia.com/v1",
+    # HuggingFace, 30 rpm. Unverified.
+    "huggingface/meta-llama/Llama-3.3-70B-Instruct",
     "gemini/gemini-flash-lite-latest",
     "openai/mistral-Nemo-Instruct-2407 @ https://api.llm7.io/v1",
     # Groq: 100% (24/24) in the golden set, but a small daily token budget.
     "groq/openai/gpt-oss-120b",
-    "openai/openai/gpt-oss-120b @ https://integrate.api.nvidia.com/v1",
+    "openai/openai/gpt-oss-20b @ https://integrate.api.nvidia.com/v1",
     "gemini/gemini-3.5-flash-lite",
-    # HuggingFace 30 rpm, Cloudflare 10 rpm. Unverified.
-    "huggingface/openai/gpt-oss-120b",
-    "cloudflare/@cf/meta/llama-3.3-70b-instruct-fp8-fast",
-    "openai/gemini-3.1-flash-lite @ https://api.llm7.io/v1",
+    "huggingface/deepseek-ai/DeepSeek-V4-Flash-0731",
+    "cerebras/gemma-4-31b",
     "groq/openai/gpt-oss-20b",
 )
 # Left out on purpose: OpenRouter (1 rpm), OVHcloud (2 rpm), Mistral large and
-# Cohere (slow for a waiting user), reasoning models (answer in thought tokens).
+# Cohere (slow for a waiting user), Cloudflare (its api_base is a template
+# placeholder, so it has no stable key here), reasoning models (answer in thought tokens).
 
 
 def order_key(model_id: str, api_base: str = "") -> str:
