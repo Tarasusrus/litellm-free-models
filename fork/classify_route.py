@@ -38,31 +38,35 @@ ROUTE_NAME = "classify"
 KEY_SEP = " @ "
 
 # Per-attempt timeout and retries written into every `classify` deployment.
-# The client waits at most ~10 s in total; 4 s per deployment leaves room for
-# two fallbacks. `num_retries: 0`: the next deployment is the retry.
-CLASSIFY_TIMEOUT_S = 4
+# The client waits at most ~10 s in total; 6 s lets a slow-but-working
+# deployment answer (4 s cooled them down and shrank the chain) and still
+# leaves room for one fallback. `num_retries: 0`: the next deployment is the retry.
+CLASSIFY_TIMEOUT_S = 6
 CLASSIFY_NUM_RETRIES = 0
 
 # Preference order, first = tried first. Providers alternate on purpose.
 CLASSIFY_ORDER: tuple[str, ...] = (
-    # LLM7.io: 40 rpm anonymous tier; DeepSeek-V4-Flash scored 19/19 in the
-    # simpleAI golden set (2026-10-21), ~1 s.
-    "openai/DeepSeek-V4-Flash-0731 @ https://api.llm7.io/v1",
-    # NVIDIA NIM, 40 rpm, a plain (non-reasoning) instruct model. Unverified.
-    "openai/google/gemma-4-31b-it @ https://integrate.api.nvidia.com/v1",
-    # Google AI Studio: strong json_schema support, verified 5/5; its daily
-    # request quota is shared with other consumers, hence not first.
-    "gemini/gemini-3.1-flash-lite",
-    # Cerebras, 30 rpm, very fast. Unverified.
-    "cerebras/gpt-oss-120b",
-    # HuggingFace, 30 rpm. Unverified.
-    "huggingface/meta-llama/Llama-3.3-70B-Instruct",
-    "gemini/gemini-flash-lite-latest",
+    # Order of 2026-10-21, from live probes through this proxy (one request per
+    # deployment, a ~750-token classification prompt):
+    #   llm7 mistral-nemo 0.6 s, gemini 3.1 flash-lite 0.7 s, groq gpt-oss-120b
+    #   0.8 s, gemini flash-lite-latest 0.4 s, gemini 3.5 flash-lite 0.5 s;
+    #   llm7 DeepSeek 1-20 s (varies), NVIDIA gemma-4-31b 6 s, NVIDIA gpt-oss-20b
+    #   4.5 s. Fast ones lead; slow ones stay as late fallbacks.
+    # Gemini 3.5 flash-lite is `standard`'s first choice (job-hunt burns its
+    # daily quota), so it goes last among the Gemini models.
     "openai/mistral-Nemo-Instruct-2407 @ https://api.llm7.io/v1",
-    # Groq: 100% (24/24) in the golden set, but a small daily token budget.
+    "gemini/gemini-3.1-flash-lite",
+    # Groq: 100% (24/24) in the simpleAI golden set; a small budget (2 rpm,
+    # 8000 tpm per deployment), so it is a mid-chain stop, not the head.
     "groq/openai/gpt-oss-120b",
-    "openai/openai/gpt-oss-20b @ https://integrate.api.nvidia.com/v1",
+    "gemini/gemini-flash-lite-latest",
+    # Cerebras 30 rpm and HuggingFace 30 rpm: fast, free, need a key. Unverified.
+    "cerebras/gpt-oss-120b",
+    "huggingface/meta-llama/Llama-3.3-70B-Instruct",
+    "openai/DeepSeek-V4-Flash-0731 @ https://api.llm7.io/v1",
     "gemini/gemini-3.5-flash-lite",
+    "openai/google/gemma-4-31b-it @ https://integrate.api.nvidia.com/v1",
+    "openai/openai/gpt-oss-20b @ https://integrate.api.nvidia.com/v1",
     "huggingface/deepseek-ai/DeepSeek-V4-Flash-0731",
     "cerebras/gemma-4-31b",
     "groq/openai/gpt-oss-20b",
