@@ -240,9 +240,8 @@ exhausted free-tier quota costs seconds; direct models answered in 0.1-1.5 s.
   chain at their written slot. A test fails when a listed deployment
   disappears from the template (an upstream rename must not silently empty
   the chain).
-- Every attempt is short: `timeout: 4`, `num_retries: 0` written into each
-  deployment; the next deployment is the retry. The client keeps its own
-  overall limit (~10 s).
+- No limits of its own: deployments keep the proxy's usual timeout and retry
+  settings, like every other generated route.
 - Left out on purpose: OpenRouter (1 rpm), OVHcloud (2 rpm), Mistral large and
   Cohere (slow for a waiting user), reasoning models (they answer in thought
   tokens). Entries not yet through `tools/smoke-json-schema.py` with a key are

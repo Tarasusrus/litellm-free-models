@@ -96,14 +96,15 @@ class ClassifyChainTest(unittest.TestCase):
 
 
 class ClassifyRenderTest(unittest.TestCase):
-    def test_every_deployment_has_order_and_short_attempts(self):
+    def test_every_deployment_has_order_and_keeps_proxy_defaults(self):
         chain = classify_route.chain(_template_blocks(), _all_keys_env())
         text = "".join(classify_route.render_blocks(chain))
         n = len(chain)
         self.assertEqual(text.count(f"model_name: {ROUTE}"), n)
         self.assertEqual(re.findall(r"^\s+order: (\d+)$", text, re.M), [str(i) for i in range(1, n + 1)])
-        self.assertEqual(re.findall(r"^\s+timeout: (\d+)$", text, re.M), [str(classify_route.CLASSIFY_TIMEOUT_S)] * n)
-        self.assertEqual(re.findall(r"^\s+num_retries: (\d+)$", text, re.M), [str(classify_route.CLASSIFY_NUM_RETRIES)] * n)
+        # No limits of its own: whatever timeout the deployment block carries is copied as is.
+        self.assertNotIn("timeout: 4", text)
+        self.assertNotIn("timeout: 6", text)
 
     def test_rendered_config_pins_the_route_and_fallback_depth(self):
         with tempfile.TemporaryDirectory() as d:
