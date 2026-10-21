@@ -19,8 +19,8 @@ closed with `{"classify": []}`. Differences:
 * Only deployments named in CLASSIFY_ORDER take part. A deployment without a
   key drops out at render time, so adding NVIDIA/Cerebras/... keys later
   puts their entries into the chain at the slot written here.
-* Each attempt is short (CLASSIFY_TIMEOUT_S, no retries of its own): the
-  next deployment is the retry.
+* Deployments keep the proxy's usual timeout and retry settings, like every
+  other generated route; this route adds no limits of its own.
 
 `CLASSIFY_ORDER` entries are `model @ host` keys (as in tools_route.py).
 Entries marked "unverified" have not been through tools/smoke-json-schema.py
@@ -29,40 +29,35 @@ GuardedClassifier), so a bad one costs one attempt, not a wrong label.
 """
 from __future__ import annotations
 
-import re
-
 from fork import standard
 
 ROUTE_NAME = "classify"
 
 KEY_SEP = " @ "
 
-# Per-attempt timeout and retries written into every `classify` deployment.
-# The client waits at most ~10 s in total; 4 s per deployment leaves room for
-# two fallbacks. `num_retries: 0`: the next deployment is the retry.
-CLASSIFY_TIMEOUT_S = 4
-CLASSIFY_NUM_RETRIES = 0
-
 # Preference order, first = tried first. Providers alternate on purpose.
 CLASSIFY_ORDER: tuple[str, ...] = (
-    # LLM7.io: 40 rpm anonymous tier; DeepSeek-V4-Flash scored 19/19 in the
-    # simpleAI golden set (2026-10-21), ~1 s.
-    "openai/DeepSeek-V4-Flash-0731 @ https://api.llm7.io/v1",
-    # NVIDIA NIM, 40 rpm, a plain (non-reasoning) instruct model. Unverified.
-    "openai/google/gemma-4-31b-it @ https://integrate.api.nvidia.com/v1",
-    # Google AI Studio: strong json_schema support, verified 5/5; its daily
-    # request quota is shared with other consumers, hence not first.
-    "gemini/gemini-3.1-flash-lite",
-    # Cerebras, 30 rpm, very fast. Unverified.
-    "cerebras/gpt-oss-120b",
-    # HuggingFace, 30 rpm. Unverified.
-    "huggingface/meta-llama/Llama-3.3-70B-Instruct",
-    "gemini/gemini-flash-lite-latest",
+    # Order of 2026-10-21, from live probes through this proxy (one request per
+    # deployment, a ~750-token classification prompt):
+    #   llm7 mistral-nemo 0.6 s, gemini 3.1 flash-lite 0.7 s, groq gpt-oss-120b
+    #   0.8 s, gemini flash-lite-latest 0.4 s, gemini 3.5 flash-lite 0.5 s;
+    #   llm7 DeepSeek 1-20 s (varies), NVIDIA gemma-4-31b 6 s, NVIDIA gpt-oss-20b
+    #   4.5 s. Fast ones lead; slow ones stay as late fallbacks.
+    # Gemini 3.5 flash-lite is `standard`'s first choice (job-hunt burns its
+    # daily quota), so it goes last among the Gemini models.
     "openai/mistral-Nemo-Instruct-2407 @ https://api.llm7.io/v1",
-    # Groq: 100% (24/24) in the golden set, but a small daily token budget.
+    "gemini/gemini-3.1-flash-lite",
+    # Groq: 100% (24/24) in the simpleAI golden set; a small budget (2 rpm,
+    # 8000 tpm per deployment), so it is a mid-chain stop, not the head.
     "groq/openai/gpt-oss-120b",
-    "openai/openai/gpt-oss-20b @ https://integrate.api.nvidia.com/v1",
+    "gemini/gemini-flash-lite-latest",
+    # Cerebras 30 rpm and HuggingFace 30 rpm: fast, free, need a key. Unverified.
+    "cerebras/gpt-oss-120b",
+    "huggingface/meta-llama/Llama-3.3-70B-Instruct",
+    "openai/DeepSeek-V4-Flash-0731 @ https://api.llm7.io/v1",
     "gemini/gemini-3.5-flash-lite",
+    "openai/google/gemma-4-31b-it @ https://integrate.api.nvidia.com/v1",
+    "openai/openai/gpt-oss-20b @ https://integrate.api.nvidia.com/v1",
     "huggingface/deepseek-ai/DeepSeek-V4-Flash-0731",
     "cerebras/gemma-4-31b",
     "groq/openai/gpt-oss-20b",
@@ -89,55 +84,8 @@ def chain(blocks: list[dict], env: dict[str, str], providers: dict | None = None
     return [b for _, b in picked]
 
 
-_TIMEOUT = re.compile(r"^(\s+)timeout:\s*\S+\s*$")
-_RETRIES = re.compile(r"^(\s+)num_retries:\s*\S+\s*$")
-
-
-def _short_attempts_block(block: list[str]) -> list[str]:
-    """One deployment: its copied `timeout` / `num_retries` become the route's
-    values; a missing one is added right after `order:`."""
-    out: list[str] = []
-    seen_t = seen_r = False
-    for line in block:
-        text = line.rstrip("\n")
-        if m := _TIMEOUT.match(text):
-            out.append(f"{m.group(1)}timeout: {CLASSIFY_TIMEOUT_S}\n")
-            seen_t = True
-        elif m := _RETRIES.match(text):
-            out.append(f"{m.group(1)}num_retries: {CLASSIFY_NUM_RETRIES}\n")
-            seen_r = True
-        else:
-            out.append(line)
-    if seen_t and seen_r:
-        return out
-    fixed: list[str] = []
-    for line in out:
-        fixed.append(line)
-        if line.strip().startswith("order:"):
-            indent = line[: len(line) - len(line.lstrip())]
-            if not seen_t:
-                fixed.append(f"{indent}timeout: {CLASSIFY_TIMEOUT_S}\n")
-            if not seen_r:
-                fixed.append(f"{indent}num_retries: {CLASSIFY_NUM_RETRIES}\n")
-    return fixed
-
-
-def _short_attempts(lines: list[str]) -> list[str]:
-    """Apply _short_attempts_block to every `- model_name:` block."""
-    out: list[str] = []
-    block: list[str] = []
-    for line in lines:
-        if line.startswith("  - model_name:"):
-            out.extend(_short_attempts_block(block))
-            block = []
-        block.append(line)
-    out.extend(_short_attempts_block(block))
-    return out
-
-
 def render_blocks(chain_blocks: list[dict]) -> list[str]:
     """YAML lines for the `classify` deployments, ready to append to model_list."""
-    lines = standard.render_blocks(
+    return standard.render_blocks(
         chain_blocks, route_name=ROUTE_NAME,
         what="short structured-output chain for classification, tried in `order`")
-    return _short_attempts(lines)
