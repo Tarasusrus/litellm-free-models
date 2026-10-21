@@ -42,16 +42,16 @@ class ClassifyOrderTest(unittest.TestCase):
     def test_order_has_no_duplicates(self):
         self.assertEqual(len(classify_route.CLASSIFY_ORDER), len(set(classify_route.CLASSIFY_ORDER)))
 
-    def test_every_named_deployment_exists_in_the_template(self):
+    def test_every_named_deployment_is_live_with_all_keys(self):
+        # An entry can exist in the template and still never reach the chain
+        # (upstream's renderer filters it, or the host is a placeholder). With
+        # every provider keyed, each name must be a real deployment of the
+        # chain; a dead name is a slot that silently never fires.
         # Mutation: rename a model in CLASSIFY_ORDER -> this fails.
-        known = {classify_route.order_key(b["model_id"], b.get("api_base", ""))
-                 for b in _template_blocks() if b.get("mode", "chat") == "chat"}
-        # Template api_base for Cloudflare is a placeholder; compare model ids there.
-        known_models = {b["model_id"] for b in _template_blocks()}
-        for key in classify_route.CLASSIFY_ORDER:
-            model, _, _host = key.partition(classify_route.KEY_SEP)
-            self.assertTrue(key in known or model in known_models,
-                            f"{key!r} is not a deployment in the template or fork/models.yaml")
+        live = {classify_route.order_key(b["model_id"], b.get("api_base", ""))
+                for b in standard.chain(_template_blocks(), _all_keys_env())}
+        dead = [k for k in classify_route.CLASSIFY_ORDER if k not in live]
+        self.assertEqual(dead, [], f"CLASSIFY_ORDER names deployments that never render: {dead}")
 
     def test_providers_alternate_at_the_head(self):
         # The first three slots must not share a provider: one burnt quota
