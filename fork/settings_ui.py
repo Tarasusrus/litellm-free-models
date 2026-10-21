@@ -52,7 +52,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from fork import standard, tools_route, vision_route  # noqa: E402
+from fork import classify_route, standard, tools_route, vision_route  # noqa: E402
 from providers_config import PROVIDERS  # noqa: E402
 
 
@@ -289,7 +289,8 @@ _ROUTE_HEADER = re.compile(r"'([a-z][a-z0-9_-]*)' route: \d+ deployment\(s\)")
 
 # The routes fork/render.py prints at every start, in print order.
 # Must match fork/render.py (standard, then NARROWED_ROUTES); a test pins it.
-ROUTES: tuple[str, ...] = (standard.ROUTE_NAME, tools_route.ROUTE_NAME, vision_route.ROUTE_NAME)
+ROUTES: tuple[str, ...] = (standard.ROUTE_NAME, tools_route.ROUTE_NAME, vision_route.ROUTE_NAME,
+                           classify_route.ROUTE_NAME)
 
 
 def parse_chains(log_text: str) -> dict[str, list[dict[str, Any]]]:

@@ -220,6 +220,35 @@ new provider needs a slot in `PROVIDER_PRIORITY` and in the table above.
 - The settings page and the start-up log show the chain next to `standard`
   and `tools`.
 
+### 7. The `classify` route
+
+A short chain for tiny structured-output requests: one short text in, one
+label out (simpleAI's expense-category classifier: ~750 tokens in, <=150 out,
+strict `json_schema`, a person waiting). Measured 2026-10-21: `standard`
+answered in ~8 s on average because it walks every keyed provider and one
+exhausted free-tier quota costs seconds; direct models answered in 0.1-1.5 s.
+
+- Same mechanics as the other generated routes (`fork/render.py`
+  `NARROWED_ROUTES`): built at render time from the keyed deployments,
+  unique `litellm_params.order`, closed with `{"classify": []}`.
+- The order is an operator list, `fork/classify_route.CLASSIFY_ORDER`
+  (`model @ host` keys), not provider priority. **Providers alternate** so a
+  quota that one provider burnt is skipped after one fast failure; a test
+  pins that the first three slots do not share a provider.
+- Only deployments named in the list take part; a deployment without a key
+  drops out at render time, so a key added later puts its entries into the
+  chain at their written slot. A test fails when a listed deployment
+  disappears from the template (an upstream rename must not silently empty
+  the chain).
+- Every attempt is short: `timeout: 4`, `num_retries: 0` written into each
+  deployment; the next deployment is the retry. The client keeps its own
+  overall limit (~10 s).
+- Left out on purpose: OpenRouter (1 rpm), OVHcloud (2 rpm), Mistral large and
+  Cohere (slow for a waiting user), reasoning models (they answer in thought
+  tokens). Entries not yet through `tools/smoke-json-schema.py` with a key are
+  marked "unverified" in the file; the client validates every answer, so a bad
+  one costs one attempt, not a wrong label.
+
 ## Consequences
 
 - Upstream syncs are mechanical; the template is never edited by hand here.

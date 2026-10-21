@@ -12,9 +12,11 @@ Drop-in for `python3 render-config.py` (same flags).
      `order` (fork/standard.py) -- and the `tools` deployments: the same
      chain narrowed to the tool-calling allowlist (fork/tools_route.py),
      and the `vision` deployments: narrowed to the image-reading allowlist
-     and flagged `supports_vision` (fork/vision_route.py).
-  3. Pins `{"standard": []}`, `{"tools": []}` and `{"vision": []}` in
-     router_settings.fallbacks,
+     and flagged `supports_vision` (fork/vision_route.py), and the
+     `classify` deployments: a short chain in operator order with short
+     per-attempt timeouts (fork/classify_route.py).
+  3. Pins `{"standard": []}`, `{"tools": []}`, `{"vision": []}` and
+     `{"classify": []}` in router_settings.fallbacks,
      so each route ends explicitly instead of drifting into the catch-all '*'.
   4. Sets `router_settings.max_fallbacks` to the longest chain: LiteLLM's
      order-based fallback walks one order level per hop and stops at
@@ -40,7 +42,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from fork import standard, tools_route, vision_route  # noqa: E402
+from fork import classify_route, standard, tools_route, vision_route  # noqa: E402
 
 
 def _load_upstream_renderer():
@@ -92,7 +94,7 @@ def add_standard_route(lines: list[str], env: dict[str, str]) -> tuple[list[str]
 
 # Routes narrowed from `standard` by an allowlist; each module provides
 # ROUTE_NAME, chain(blocks, env) and render_blocks(chain).
-NARROWED_ROUTES = (tools_route, vision_route)
+NARROWED_ROUTES = (tools_route, vision_route, classify_route)
 
 
 def add_narrowed_route(lines: list[str], env: dict[str, str], route) -> tuple[list[str], list[dict]]:
