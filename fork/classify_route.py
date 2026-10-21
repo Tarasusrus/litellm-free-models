@@ -37,32 +37,29 @@ KEY_SEP = " @ "
 
 # Preference order, first = tried first. Providers alternate on purpose.
 CLASSIFY_ORDER: tuple[str, ...] = (
-    # Order of 2026-10-21, from live probes through this proxy (one request per
-    # deployment, a ~750-token classification prompt):
-    #   llm7 mistral-nemo 0.6 s, gemini 3.1 flash-lite 0.7 s, groq gpt-oss-120b
-    #   0.8 s, gemini flash-lite-latest 0.4 s, gemini 3.5 flash-lite 0.5 s;
-    #   llm7 DeepSeek 1-20 s (varies), NVIDIA gemma-4-31b 6 s, NVIDIA gpt-oss-20b
-    #   4.5 s. Fast ones lead; slow ones stay as late fallbacks.
-    # Gemini 3.5 flash-lite is `standard`'s first choice (job-hunt burns its
+    # Fast models first (live probes through this proxy, 2026-10-21, ~750-token
+    # classification prompt): llm7 mistral-nemo 0.6 s, gemini 3.1 flash-lite 0.7 s,
+    # groq gpt-oss-120b 0.8 s, gemini flash-lite-latest 0.4 s, gemini 3.5
+    # flash-lite 0.5 s. Providers alternate so one burnt quota is skipped fast.
+    # Gemini 3.5 flash-lite is the first choice of `standard` (job-hunt burns its
     # daily quota), so it goes last among the Gemini models.
     "openai/mistral-Nemo-Instruct-2407 @ https://api.llm7.io/v1",
     "gemini/gemini-3.1-flash-lite",
-    # Groq: 100% (24/24) in the simpleAI golden set; a small budget (2 rpm,
-    # 8000 tpm per deployment), so it is a mid-chain stop, not the head.
+    # Groq: 100% (24/24) in the simpleAI golden set; small budget (2 rpm,
+    # 8000 tpm per deployment), so a mid-chain stop, not the head.
     "groq/openai/gpt-oss-120b",
     "gemini/gemini-flash-lite-latest",
     # Cerebras 30 rpm and HuggingFace 30 rpm: fast, free, need a key. Unverified.
     "cerebras/gpt-oss-120b",
     "huggingface/meta-llama/Llama-3.3-70B-Instruct",
-    "openai/DeepSeek-V4-Flash-0731 @ https://api.llm7.io/v1",
     "gemini/gemini-3.5-flash-lite",
-    "openai/google/gemma-4-31b-it @ https://integrate.api.nvidia.com/v1",
-    "openai/openai/gpt-oss-20b @ https://integrate.api.nvidia.com/v1",
-    "huggingface/deepseek-ai/DeepSeek-V4-Flash-0731",
-    "cerebras/gemma-4-31b",
-    "groq/openai/gpt-oss-20b",
+    # Last resort: the DeepSeek that already served classification (1-20 s, slow
+    # but accurate, 19/19 on the golden set). Reached only when every fast model
+    # above has failed.
+    "openai/DeepSeek-V4-Flash-0731 @ https://api.llm7.io/v1",
 )
-# Left out on purpose: OpenRouter (1 rpm), OVHcloud (2 rpm), Mistral large and
+# Left out on purpose: NVIDIA gemma-4-31b / gpt-oss-20b (4-20 s), groq gpt-oss-20b
+# (tokens per day run out first), OpenRouter (1 rpm), OVHcloud (2 rpm), Mistral large and
 # Cohere (slow for a waiting user), Cloudflare (its api_base is a template
 # placeholder, so it has no stable key here), reasoning models (answer in thought tokens).
 
