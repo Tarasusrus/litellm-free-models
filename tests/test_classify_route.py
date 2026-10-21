@@ -42,6 +42,12 @@ class ClassifyOrderTest(unittest.TestCase):
     def test_order_has_no_duplicates(self):
         self.assertEqual(len(classify_route.CLASSIFY_ORDER), len(set(classify_route.CLASSIFY_ORDER)))
 
+    def test_deepseek_is_the_last_resort_and_slow_models_are_out(self):
+        # Mutation: move DeepSeek up, or bring an NVIDIA entry back -> this fails.
+        order = classify_route.CLASSIFY_ORDER
+        self.assertEqual(order[-1], "openai/DeepSeek-V4-Flash-0731 @ https://api.llm7.io/v1")
+        self.assertFalse([k for k in order if "nvidia" in k or k == "groq/openai/gpt-oss-20b"])
+
     def test_every_named_deployment_is_live_with_all_keys(self):
         # An entry can exist in the template and still never reach the chain
         # (upstream's renderer filters it, or the host is a placeholder). With
